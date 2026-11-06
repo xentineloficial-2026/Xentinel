@@ -1,0 +1,905 @@
+/* Portada por capítulos: cada idea ocupa la pantalla, el producto a gran escala y el scroll narra. */
+
+/* Los capítulos de cine conservan su atmósfera aunque el sitio esté en modo claro. */
+.xn-oscuro {
+  --xn-fondo: #06141b;
+  --xn-texto: #edf0ef;
+  --xn-tenue: #9ba8ab;
+  --xn-superficie: #0d1d27;
+  --xn-superficie-alterna: #162936;
+  --xn-borde: #253745;
+  --xn-azul: #ccd0cf;
+  --xn-azul-suave: #1a2e3b;
+  --xn-accion: #ccd0cf;
+  --xn-accion-cursor: #edf0ef;
+  --xn-accion-texto: #06141b;
+  --xn-exito: #8fc3a8;
+  --xn-exito-suave: #13302a;
+  --xn-aviso: #d9b878;
+  --xn-peligro: #e39a8c;
+  --xn-vidrio: #11212d9e;
+  --xn-vidrio-borde: #ccd0cf26;
+  --xn-contorno: #9ba8ab;
+  background: var(--xn-fondo);
+  color: var(--xn-texto);
+}
+.xn-sitio .xn-oscuro h1,
+.xn-sitio .xn-oscuro h2,
+.xn-sitio .xn-oscuro h3 {
+  color: var(--xn-texto);
+}
+
+/* 1. Escudo: sección fijada que se recorre durante tres pantallas. */
+.xn-cine {
+  --p: 0;
+  height: 340vh;
+  margin-top: -92px;
+}
+.xn-cine-fijo {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+.xn-cine-resplandor {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(
+      60vmax 44vmax at 50% 46%,
+      #1f3a4b 0%,
+      #11212d 42%,
+      transparent 74%
+    ),
+    #06141b;
+}
+.xn-cine-fijo > .xn-perimetro {
+  inset: 50% auto auto 50%;
+  width: 150vmax;
+  height: 150vmax;
+  opacity: 0.22;
+  transform: translate(-50%, -50%) scale(calc(0.75 + var(--p) * 0.5));
+}
+.xn-cine-marca {
+  position: absolute;
+  inset: 0 0 8vh;
+  display: grid;
+  place-items: center;
+  font-size: 24.5vw;
+  font-weight: 700;
+  letter-spacing: -0.045em;
+  line-height: 1;
+  white-space: nowrap;
+  color: #ccd0cf;
+  opacity: clamp(0, calc(1 - var(--p) * 3.4), 0.92);
+  transform: scale(calc(1 + var(--p) * 0.3));
+  user-select: none;
+}
+.xn-cine-lienzo {
+  position: absolute;
+  inset: 0;
+}
+.xn-cine-lienzo canvas {
+  display: block;
+}
+.xn-cine-respaldo {
+  position: absolute;
+  inset: 16% 0;
+  width: 100%;
+  height: 68%;
+  color: #ccd0cf;
+}
+.xn-cine-portada {
+  position: absolute;
+  left: max(24px, calc(50% - 636px));
+  right: max(24px, calc(50% - 636px));
+  bottom: 40px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 32px;
+  opacity: clamp(0, calc(1 - var(--p) * 7), 1);
+  transform: translateY(calc(var(--p) * -60px));
+}
+.xn-cine[data-inicio='no'] .xn-cine-portada {
+  visibility: hidden;
+}
+.xn-cine-portada h1 {
+  font-size: clamp(30px, 4vw, 56px);
+  line-height: 1.04;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  text-shadow: 0 2px 24px #06141bcc;
+}
+.xn-welcome {
+  color: var(--xn-tenue);
+  font-size: 16px;
+  margin-bottom: 10px !important;
+}
+.xn-cine-acciones {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px 24px;
+  flex-shrink: 0;
+}
+.xn-cine-paso {
+  position: absolute;
+  font-size: clamp(44px, 7.6vw, 124px);
+  line-height: 0.98;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+.xn-cine-paso--uno {
+  left: max(24px, calc(50% - 636px));
+  bottom: 9vh;
+  opacity: clamp(
+    0,
+    min(calc((var(--p) - 0.14) * 9), calc((0.5 - var(--p)) * 9)),
+    1
+  );
+  transform: translateY(calc((0.3 - var(--p)) * 120px));
+}
+.xn-cine-paso--dos {
+  right: max(24px, calc(50% - 636px));
+  bottom: 9vh;
+  text-align: right;
+  opacity: clamp(0, calc((var(--p) - 0.62) * 8), 1);
+  transform: translateY(calc((0.8 - var(--p)) * 120px));
+}
+
+/* 2. Capítulos a pantalla completa. */
+.xn-capitulo {
+  --p: 0;
+  position: relative;
+  overflow: hidden;
+  min-height: 100vh;
+  padding: 120px max(24px, calc(50% - 636px));
+}
+.xn-capitulo h2 {
+  font-size: clamp(44px, 7.4vw, 116px);
+  line-height: 0.98;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+.xn-capitulo p {
+  font-size: clamp(18px, 1.7vw, 24px);
+  line-height: 1.4;
+  color: var(--xn-tenue);
+  max-width: 34ch;
+  margin-top: 24px !important;
+}
+
+/* Carnet: el teléfono entra girando en perspectiva mientras cruza la pantalla. */
+.xn-capitulo--carnet {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 48px;
+}
+.xn-capitulo--carnet > .xn-perimetro {
+  right: -30%;
+  top: 50%;
+  width: 1300px;
+  height: 1300px;
+  transform: translateY(-50%);
+  opacity: 0.2;
+}
+.xn-capitulo-texto {
+  position: relative;
+}
+.xn-telefono {
+  position: relative;
+  justify-self: center;
+  width: min(360px, 82vw);
+  padding: 11px;
+  border-radius: 52px;
+  background: linear-gradient(150deg, #3a4f5e, #16252f 42%, #2a3c49);
+  box-shadow:
+    0 50px 90px -30px #000,
+    inset 0 0 0 1px #ccd0cf38;
+  transform: perspective(1400px)
+    rotateY(calc((0.5 - min(var(--p), 0.5)) * -68deg))
+    rotateX(calc((0.5 - min(var(--p), 0.5)) * 18deg));
+  will-change: transform;
+}
+.xn-telefono-pantalla {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 56px 18px 104px;
+  border-radius: 42px;
+  background: #06141b;
+}
+.xn-telefono-isla {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  width: 96px;
+  height: 26px;
+  border-radius: 20px;
+  background: #000;
+  transform: translateX(-50%);
+}
+.xn-telefono-cabecera {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  margin-bottom: 18px;
+}
+.xn-telefono-cabecera svg {
+  width: 22px;
+  height: 24px;
+}
+.xn-telefono-cabecera b {
+  font-weight: 600;
+}
+.xn-telefono-cabecera span {
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #8fc3a8;
+  background: #13302a;
+}
+.xn-telefono-qr {
+  padding: 14px;
+  border-radius: 16px;
+  background: #fff;
+}
+.xn-telefono-qr svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.xn-telefono-barra {
+  display: block;
+  height: 4px;
+  margin-top: 14px;
+  border-radius: 4px;
+  background: #ccd0cf;
+  transform-origin: left;
+  animation: xn-cuenta 15s linear both;
+}
+@keyframes xn-cuenta {
+  to {
+    transform: scaleX(0);
+  }
+}
+.xn-capitulo .xn-telefono-nombre {
+  margin: 18px 0 0 !important;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #edf0ef;
+  text-align: center;
+  max-width: none;
+}
+.xn-capitulo .xn-telefono-rol {
+  margin: 0 !important;
+  font-size: 14px;
+  text-align: center;
+  max-width: none;
+}
+/* Barra inferior flotante: el indicador recorre las pestañas como en la app. */
+.xn-dock {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  padding: 5px;
+  border-radius: 20px;
+  background: #11212db8;
+  border: 1px solid #ccd0cf26;
+  backdrop-filter: blur(14px);
+}
+.xn-dock span {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 1px;
+  padding: 7px 0 5px;
+  font-size: 11px;
+  color: #9ba8ab;
+}
+.xn-dock-indicador {
+  position: absolute;
+  top: 5px;
+  bottom: 5px;
+  left: 5px;
+  width: calc((100% - 10px) / 4);
+  border-radius: 15px;
+  background: #253745;
+  animation: xn-dock 12s cubic-bezier(0.7, 0, 0.2, 1) infinite;
+}
+@keyframes xn-dock {
+  0%,
+  20% {
+    transform: translateX(0);
+  }
+  25%,
+  45% {
+    transform: translateX(100%);
+  }
+  50%,
+  70% {
+    transform: translateX(200%);
+  }
+  75%,
+  95% {
+    transform: translateX(300%);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+/* Panel: facetas iluminadas al fondo y ventana de vidrio que se acerca con el scroll. */
+.xn-capitulo--panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding-bottom: 96px;
+}
+.xn-facetas {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(90vmax 60vmax at 70% 20%, #1a2e3b, #06141b);
+}
+.xn-facetas canvas {
+  display: block;
+}
+.xn-capitulo-encabezado {
+  position: relative;
+}
+.xn-capitulo-encabezado p {
+  max-width: none;
+}
+.xn-vitrina-escala {
+  position: relative;
+  width: 100%;
+  max-width: 1200px;
+  margin-top: 56px;
+  transform: scale(calc(0.8 + min(var(--p) * 1.8, 1) * 0.2))
+    translateY(calc((1 - min(var(--p) * 1.8, 1)) * 60px));
+  transform-origin: top center;
+  will-change: transform;
+}
+.xn-vitrina {
+  display: grid;
+  grid-template-columns: 188px minmax(0, 1fr);
+  text-align: left;
+  font-size: 14px;
+  color: #edf0ef;
+  border-radius: 20px;
+  background: #0d1d2794;
+  border: 1px solid #ccd0cf33;
+  backdrop-filter: blur(22px) saturate(1.3);
+  -webkit-backdrop-filter: blur(22px) saturate(1.3);
+  box-shadow: 0 60px 120px -40px #000;
+  overflow: hidden;
+}
+.xn-vitrina-lateral {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  padding: 18px 12px;
+  border-right: 1px solid #ccd0cf1f;
+}
+.xn-vitrina-lateral span {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 9px;
+  color: #9ba8ab;
+}
+.xn-vitrina-lateral .xn-vitrina-marca {
+  margin-bottom: 10px;
+  color: #edf0ef;
+  font-weight: 600;
+}
+.xn-vitrina-marca svg {
+  width: 20px;
+  height: 22px;
+}
+.xn-vitrina-lateral .activo {
+  color: #edf0ef;
+  background: #ccd0cf1f;
+}
+.xn-vitrina-cuerpo {
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+  min-width: 0;
+}
+.xn-vitrina-titulo {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.xn-vitrina-titulo b {
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.xn-vitrina-titulo span {
+  font-size: 12px;
+  color: #9ba8ab;
+}
+.xn-vitrina-cifras {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.xn-vitrina-tarjeta {
+  padding: 14px;
+  border-radius: 14px;
+  background: #ccd0cf12;
+  border: 1px solid #ccd0cf1a;
+  min-width: 0;
+}
+.xn-vitrina-tarjeta > span {
+  display: block;
+  font-size: 13px;
+  color: #9ba8ab;
+}
+.xn-vitrina-cifras strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.xn-vitrina-graficas {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.7fr) minmax(0, 1.3fr);
+  gap: 10px;
+}
+.xn-vitrina-barras > div {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  height: 170px;
+  margin-top: 12px;
+  padding-bottom: 20px;
+}
+.xn-vitrina-barras i {
+  position: relative;
+  flex: 1;
+  height: var(--v);
+  border-radius: 6px;
+  background: linear-gradient(#ccd0cf, #4a5c6a);
+}
+.xn-vitrina-barras small {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -20px;
+  font-size: 12px;
+  font-style: normal;
+  text-align: center;
+  color: #9ba8ab;
+}
+.xn-vitrina-dona {
+  text-align: center;
+}
+.xn-vitrina-dona svg {
+  display: block;
+  width: 112px;
+  margin: 12px auto 4px;
+  transform: rotate(-90deg);
+}
+.xn-vitrina-dona circle {
+  fill: none;
+  stroke: #ccd0cf26;
+  stroke-width: 4.5;
+}
+.xn-vitrina-dona circle + circle {
+  stroke: #8fc3a8;
+  stroke-linecap: round;
+  stroke-dasharray: 97 100;
+}
+.xn-vitrina-dona strong {
+  display: block;
+  font-size: 22px;
+  font-weight: 600;
+}
+.xn-vitrina-dona small {
+  font-size: 12px;
+  color: #9ba8ab;
+}
+.xn-capitulo .xn-vitrina-lista p {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 2px 8px;
+  align-items: center;
+  margin: 0 !important;
+  max-width: none;
+  padding: 8px 0;
+  border-top: 1px solid #ccd0cf14;
+  font-size: 13px;
+  color: #edf0ef;
+}
+.xn-vitrina-lista > span {
+  margin-bottom: 6px;
+}
+.xn-vitrina-lista time {
+  font-family: var(--xn-mono);
+  font-size: 12px;
+  color: #9ba8ab;
+}
+.xn-vitrina-lista b {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.xn-vitrina-lista small {
+  display: none;
+}
+.xn-vitrina-lista em {
+  font-size: 12px;
+  font-style: normal;
+  color: #8fc3a8;
+}
+.xn-vitrina-lista em.no {
+  color: #e39a8c;
+}
+
+/* 3. Funciones en cuadrícula de tamaños distintos. */
+.xn-funciones {
+  max-width: 1320px;
+  margin: auto;
+  padding: 120px 24px;
+}
+.xn-funciones > h2 {
+  font-size: clamp(40px, 6vw, 92px);
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  max-width: 14ch;
+  margin-bottom: 48px;
+}
+.xn-bento {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 14px;
+}
+.xn-bento-celda {
+  position: relative;
+  grid-column: span 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: 280px;
+  padding: 28px;
+  overflow: hidden;
+  background: var(--xn-superficie);
+  border-radius: 24px;
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.xn-bento-celda:hover {
+  transform: translateY(-3px);
+}
+.xn-bento-celda--ancha {
+  grid-column: span 4;
+}
+.xn-bento-celda > svg {
+  color: var(--xn-tenue);
+}
+.xn-bento-celda h3 {
+  font-size: clamp(24px, 2.4vw, 36px);
+  line-height: 1.05;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  max-width: 16ch;
+}
+.xn-bento-celda p {
+  font-size: 16px;
+  color: var(--xn-tenue);
+  max-width: 38ch;
+}
+.xn-bento-estados {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+}
+.xn-bento-estados span {
+  padding: 8px 14px;
+  border-radius: 12px;
+  font-family: var(--xn-mono);
+  font-size: 14px;
+  color: var(--xn-tenue);
+  background: var(--xn-superficie-alterna);
+}
+.xn-bento-estados .si {
+  color: var(--xn-exito);
+  background: var(--xn-exito-suave);
+}
+.xn-bento-estados .tarde {
+  color: var(--xn-aviso);
+  background: var(--xn-aviso-suave, #2c2719);
+}
+.xn-bento-roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+}
+.xn-bento-roles span {
+  padding: 6px 12px;
+  border-radius: 10px;
+  font-size: 14px;
+  background: var(--xn-superficie-alterna);
+}
+.xn-bento-pulso {
+  position: absolute;
+  right: 28px;
+  bottom: 28px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--xn-exito);
+}
+.xn-bento-pulso::before,
+.xn-bento-pulso::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px solid var(--xn-exito);
+  animation: xn-onda 2.6s ease-out infinite;
+}
+.xn-bento-pulso::after {
+  animation-delay: 1.3s;
+}
+@keyframes xn-onda {
+  to {
+    opacity: 0;
+    transform: scale(6);
+  }
+}
+.xn-bento-celda--tema .xn-boton {
+  margin-top: auto;
+}
+
+/* 4. Sismo: una línea en calma que crece hasta que el rojo cubre la pantalla. */
+.xn-sismo {
+  --p: 0;
+  height: 300vh;
+}
+.xn-sismo-fijo {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+}
+.xn-sismografo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.xn-sismo-calma {
+  position: absolute;
+  top: 14vh;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: clamp(40px, 7vw, 110px);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  opacity: clamp(0, calc(1 - var(--p) * 3), 1);
+}
+.xn-sismo-rojo {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-items: center;
+  padding: 24px max(24px, calc(50% - 636px));
+  background: var(--xn-emergencia);
+  color: #fff;
+  clip-path: circle(calc(max(0, var(--p) - 0.4) * 340vmax) at 50% 50%);
+  overflow: auto;
+}
+.xn-sismo-contenido {
+  max-width: 1040px;
+}
+.xn-sitio .xn-sismo-contenido h2 {
+  margin-top: 14px;
+  color: #fff;
+  font-size: clamp(44px, 8.4vw, 132px);
+  line-height: 0.95;
+  font-weight: 800;
+  letter-spacing: -0.035em;
+}
+.xn-sismo-contenido p {
+  margin-top: 22px !important;
+  font-size: clamp(18px, 1.9vw, 26px);
+  line-height: 1.35;
+  font-weight: 500;
+  max-width: 42ch;
+}
+.xn-sismo-boton {
+  margin-top: 28px;
+  min-height: 64px;
+  padding: 16px 28px;
+  border: 0;
+  border-radius: var(--xn-radio-m);
+  background: #fff;
+  color: var(--xn-emergencia-profundo);
+  font-size: 19px;
+  font-weight: 700;
+  transition: transform 0.14s;
+}
+.xn-sismo-boton:hover {
+  transform: translateY(-2px);
+}
+.xn-sismo-boton:active {
+  transform: scale(0.98);
+}
+.xn-sismo-boton:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 3px;
+}
+
+/* 5. Cierre. */
+.xn-cierre {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  padding: 140px 24px;
+  text-align: center;
+  overflow: hidden;
+}
+.xn-cierre > svg {
+  width: 96px;
+  height: 106px;
+  color: #ccd0cf;
+}
+.xn-cierre h2 {
+  max-width: 14ch;
+  font-size: clamp(44px, 7.4vw, 116px);
+  line-height: 0.98;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+.xn-cierre p {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 18px;
+  color: var(--xn-tenue);
+}
+
+@media (max-width: 1000px) {
+  .xn-capitulo--carnet {
+    grid-template-columns: 1fr;
+    padding-top: 88px;
+  }
+  .xn-vitrina {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .xn-vitrina-lateral {
+    display: none;
+  }
+  .xn-vitrina-graficas {
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  }
+  .xn-vitrina-lista {
+    grid-column: 1 / -1;
+  }
+  .xn-bento-celda,
+  .xn-bento-celda--ancha {
+    grid-column: span 3;
+  }
+  .xn-bento-celda--ancha {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 640px) {
+  .xn-cine {
+    margin-top: -74px;
+    height: 300vh;
+  }
+  .xn-cine-marca {
+    inset: 0 0 34vh;
+    font-size: 25vw;
+  }
+  .xn-cine-portada {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+    left: 16px;
+    right: 16px;
+    bottom: 24px;
+  }
+  .xn-cine-acciones {
+    justify-content: flex-start;
+  }
+  .xn-cine-paso--uno,
+  .xn-cine-paso--dos {
+    left: 16px;
+    right: 16px;
+    bottom: 6vh;
+  }
+  .xn-capitulo {
+    padding: 72px 16px;
+  }
+  .xn-vitrina-cifras {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .xn-vitrina-graficas {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .xn-funciones {
+    padding: 72px 16px;
+  }
+  .xn-bento-celda,
+  .xn-bento-celda--ancha {
+    grid-column: 1 / -1;
+    min-height: 220px;
+  }
+  .xn-sismo-rojo {
+    padding: 72px 16px 24px;
+  }
+  .xn-cierre {
+    padding: 96px 16px;
+  }
+}
+/* Sin movimiento: nada queda fijado y todo se muestra en su estado final. */
+@media (prefers-reduced-motion: reduce) {
+  .xn-cine {
+    height: auto;
+  }
+  .xn-cine-portada {
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+  }
+  .xn-cine[data-inicio] .xn-cine-portada {
+    visibility: visible;
+  }
+  .xn-cine-paso,
+  .xn-cine-marca {
+    display: none;
+  }
+  .xn-sismo {
+    height: auto;
+  }
+  .xn-sismo-fijo {
+    position: relative;
+    height: auto;
+    min-height: 100vh;
+  }
+  .xn-sismo-rojo {
+    position: relative;
+    clip-path: none;
+    min-height: 100vh;
+  }
+  .xn-sismo-calma,
+  .xn-sismografo {
+    display: none;
+  }
+  .xn-telefono,
+  .xn-vitrina-escala {
+    transform: none;
+  }
+}

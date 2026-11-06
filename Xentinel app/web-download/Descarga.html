@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#000000">
+  <title>Lleva Xentinel contigo</title>
+  <style>
+    :root{color-scheme:dark;font-family:system-ui,sans-serif;background:#000;color:#fff}
+    *{box-sizing:border-box}body{margin:0;line-height:1.6}main{max-width:720px;margin:0 auto;padding:32px 24px 64px}
+    a{color:#8bb4ff}.back{display:inline-block;margin-bottom:44px}header{margin-bottom:28px}
+    .eyebrow{font-size:13px;letter-spacing:.14em;color:#bfc9dc;font-weight:700}h1{font-size:clamp(32px,7vw,48px);line-height:1.12;margin:16px 0}h2{font-size:21px}
+    p{color:#ced3dc}.card{border:1px solid #303030;background:#101010;border-radius:22px;padding:26px;margin:20px 0}
+    .button{display:block;background:#18458d;color:white;text-align:center;text-decoration:none;padding:15px 22px;border-radius:12px;font-weight:700;margin-top:24px}
+    .button:hover{background:#2057ad}a:focus-visible{outline:3px solid white;outline-offset:5px}li{margin:12px 0;color:#ced3dc}
+    .small{font-size:14px}.status{border-left:3px solid #18458d;padding-left:16px}.hash{overflow-wrap:anywhere;font-family:monospace}
+    [hidden]{display:none!important}@media(prefers-reduced-motion:no-preference){.button{transition:background-color .18s}}
+  </style>
+</head>
+<body>
+  <main>
+    <a class="back" href="/">← Volver a Xentinel</a>
+    <header><span class="eyebrow">XENTINEL · CONTIGO EN TU SEDE</span>
+      <h1>Tu carnet y tus alertas, siempre a mano.</h1>
+      <p>Lleva Xentinel en tu celular. Consulta tu carnet digital y las indicaciones de emergencia de tu centro.</p>
+    </header>
+    <section class="card" aria-labelledby="android-title">
+      <h2 id="android-title">Xentinel para Android</h2>
+      <p id="status" class="status" role="status">Estamos comprobando la versión disponible…</p>
+      <a id="download" class="button" hidden>Descargar para Android</a>
+      <p id="version" class="small" hidden></p>
+      <details id="file-details" hidden><summary>Comprobar el archivo descargado</summary><p class="small">Huella SHA-256 del instalador:</p><p id="checksum" class="hash small"></p></details>
+      <noscript><p>Activa JavaScript para comprobar la disponibilidad del instalador.</p></noscript>
+    </section>
+    <section class="card"><h2>Te acompañamos en la instalación</h2><ol>
+      <li>Descarga el instalador desde esta página cuando esté disponible.</li>
+      <li>Abre el archivo. Si Android lo solicita, permite a tu navegador instalar esta aplicación y revisa el nombre Xentinel.</li>
+      <li>Ingresa con tu documento y contraseña. El permiso de cámara se solicita al abrir el escáner de acceso.</li>
+    </ol><p class="small">Mantén la app abierta para recibir actualizaciones de alertas. Sigue siempre las indicaciones del personal de emergencia.</p></section>
+    <p class="small">La versión para iPhone aún no tiene un enlace de distribución. Si necesitas ayuda para ingresar, contacta al equipo de tu sede.</p>
+  </main>
+  <script type="module" src="./app-download.mjs"></script>
+</body>
+</html>
+

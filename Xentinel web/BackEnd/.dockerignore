@@ -1,0 +1,13 @@
+.env
+.env.*
+.venv
+__pycache__
+*.pyc
+node_modules
+static
+clients
+docs
+scripts
+src
+test
+test.js

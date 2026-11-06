@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Lleva Xentinel contigo</title>
+    <link rel="icon" href="/simbolo-xentinel.svg" />
+    <script src="/tema.js"></script>
+    <link rel="stylesheet" href="/tema.css" />
+    <link rel="stylesheet" href="/descarga.css" />
+  </head>
+  <body>
+    <header>
+      <a class="marca" href="/"
+        ><img
+          src="/simbolo-xentinel.svg"
+          alt=""
+          width="36"
+          height="40"
+        />Xentinel</a
+      >
+      <nav aria-label="Navegación">
+        <a href="/contacto">Contáctanos</a
+        ><button id="tema" type="button">Cambiar tema</button>
+      </nav>
+    </header>
+    <main>
+      <p class="antetitulo">Xentinel · CONTIGO EN TU SEDE</p>
+      <h1>Tu comunidad,<br />siempre a mano.</h1>
+      <p>
+        Lleva Xentinel en tu celular. Consulta tu carnet digital y las
+        indicaciones de emergencia de tu centro.
+      </p>
+      <section class="tarjeta" aria-labelledby="titulo-android">
+        <h2 id="titulo-android">Xentinel para Android</h2>
+        <p id="estado-descarga" class="estado" role="status">
+          Estamos comprobando la versión disponible…
+        </p>
+        <a id="enlace-descarga" class="boton" hidden
+          >Descargar para Android ↓</a
+        >
+        <p id="version" class="pequeno" hidden></p>
+        <details id="detalles-archivo" hidden>
+          <summary>Comprobar el archivo descargado</summary>
+          <p class="pequeno">Huella SHA-256 del instalador:</p>
+          <p id="huella" class="huella pequeno"></p>
+        </details>
+        <noscript
+          ><p>
+            Activa JavaScript para comprobar la disponibilidad del instalador.
+          </p></noscript
+        >
+      </section>
+      <section class="tarjeta">
+        <h2>Te acompañamos en la instalación</h2>
+        <ol>
+          <li>
+            Descarga el instalador desde esta página cuando esté disponible.
+          </li>
+          <li>
+            Abre el archivo. Si Android lo solicita, permite a tu navegador
+            instalar esta aplicación y revisa el nombre Xentinel.
+          </li>
+          <li>
+            Ingresa con tu documento y contraseña. El permiso de cámara se
+            solicita al abrir el escáner de acceso.
+          </li>
+        </ol>
+        <p class="pequeno">
+          Mantén la app abierta para recibir actualizaciones de alertas. Sigue
+          siempre las indicaciones del personal de emergencia.
+        </p>
+      </section>
+      <p class="pequeno">
+        La versión para iPhone aún no tiene un enlace de distribución. Si
+        necesitas ayuda para ingresar, contacta al equipo de tu sede.
+      </p>
+      <a class="volver" href="/">← Volver a Xentinel</a>
+    </main>
+    <footer>Xentinel · Tu comunidad, en buenas manos.</footer>
+    <script src="/descarga.js"></script>
+    <script type="module" src="/descargarAplicacion.mjs"></script>
+  </body>
+</html>

@@ -1,0 +1,180 @@
+/* Archivo e IBM Plex Mono servidas localmente para React y la página estática de descarga. */
+@font-face {
+  font-family: Archivo;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fuentes/archivo-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: Archivo;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fuentes/archivo-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: Archivo;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fuentes/archivo-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: Archivo;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fuentes/archivo-700.woff2') format('woff2');
+}
+@font-face {
+  font-family: Archivo;
+  font-weight: 800;
+  font-display: swap;
+  src: url('/fuentes/archivo-800.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fuentes/plex-mono-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fuentes/plex-mono-500.woff2') format('woff2');
+}
+/* Sistema Xentinel. La app replica estos valores en lib/core/theme.dart: si cambias uno, cambia ambos.
+   Regla central: la interfaz es sobria; el color saturado queda reservado para las emergencias. */
+html:root {
+  --xn-fuente: Archivo, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --xn-mono: 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', monospace;
+  --xn-radio-s: 8px;
+  --xn-radio-m: 12px;
+  --xn-radio-l: 16px;
+  --xn-fondo: #eef1f0;
+  --xn-texto: #06141b;
+  --xn-tenue: #4a5c6a;
+  --xn-superficie: #f7f8f7;
+  --xn-superficie-alterna: #e2e6e5;
+  --xn-borde: #ccd0cf;
+  --xn-azul: #253745;
+  --xn-azul-suave: #dde3e3;
+  --xn-accion: #11212d;
+  --xn-accion-cursor: #253745;
+  --xn-accion-texto: #f2f4f3;
+  --xn-peligro: #a23b2e;
+  --xn-peligro-suave: #f5e3df;
+  --xn-exito: #2f6b52;
+  --xn-exito-suave: #dfebe5;
+  --xn-aviso: #86601b;
+  --xn-aviso-suave: #f3ead6;
+  --xn-sombra: 0 16px 40px -18px #06141b3d;
+  --xn-velo: #06141b99;
+  --xn-vidrio: #f7f8f7b8;
+  --xn-panel-vidrio: #f7f8f7c7;
+  --xn-vidrio-borde: #06141b1a;
+  --xn-contorno: #4a5c6a;
+  --xn-desplazamiento: #9ba8ab;
+  --xn-desplazamiento-cursor: #4a5c6a;
+  --xn-desplazamiento-activo: #11212d;
+  --xn-emergencia: #c4231a;
+  --xn-emergencia-profundo: #8e150f;
+  --xn-emergencia-texto: #fff;
+  --xn-alarma: #e8a33d;
+  --xn-alarma-texto: #06141b;
+  color-scheme: light;
+}
+html:root[data-theme='dark'] {
+  --xn-fondo: #06141b;
+  --xn-texto: #edf0ef;
+  --xn-tenue: #9ba8ab;
+  --xn-superficie: #0d1d27;
+  --xn-superficie-alterna: #162936;
+  --xn-borde: #253745;
+  --xn-azul: #ccd0cf;
+  --xn-azul-suave: #1a2e3b;
+  --xn-accion: #ccd0cf;
+  --xn-accion-cursor: #edf0ef;
+  --xn-accion-texto: #06141b;
+  --xn-peligro: #e39a8c;
+  --xn-peligro-suave: #2e1b1c;
+  --xn-exito: #8fc3a8;
+  --xn-exito-suave: #13302a;
+  --xn-aviso: #d9b878;
+  --xn-aviso-suave: #2c2719;
+  --xn-sombra: 0 20px 50px -20px #000c;
+  --xn-velo: #030b10b3;
+  --xn-vidrio: #11212d9e;
+  --xn-panel-vidrio: #0d1d27b3;
+  --xn-vidrio-borde: #ccd0cf21;
+  --xn-contorno: #9ba8ab;
+  --xn-desplazamiento: #253745;
+  --xn-desplazamiento-cursor: #4a5c6a;
+  --xn-desplazamiento-activo: #9ba8ab;
+  color-scheme: dark;
+}
+html,
+body,
+#root {
+  background: var(--xn-fondo);
+  color: var(--xn-texto);
+}
+body {
+  caret-color: var(--xn-azul);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+::selection {
+  background: var(--xn-azul);
+  color: var(--xn-fondo);
+}
+html {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--xn-desplazamiento) transparent;
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--xn-desplazamiento) transparent;
+}
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--xn-azul);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+button:not(:disabled),
+a {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+  transform: none !important;
+}
+.xn-solo-lectores {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+/* Foco y movimiento accesibles sin alterar la distinción de los estados. */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline-color: Highlight;
+  }
+  * {
+    scrollbar-color: auto;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -1,0 +1,136 @@
+/* Descarga independiente de React: utiliza la misma identidad, fuente y preferencia de tema. */
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  font-family: var(--xn-fuente);
+  background: var(--xn-fondo);
+  color: var(--xn-texto);
+  line-height: 1.7;
+}
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 24px 6%;
+  border-bottom: 1px solid var(--xn-borde);
+}
+.marca {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--xn-texto);
+  text-decoration: none;
+  letter-spacing: -1px;
+}
+.marca img {
+  object-fit: contain;
+  border-radius: 8px;
+}
+nav {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  font-size: 12px;
+}
+a {
+  color: var(--xn-azul);
+}
+button {
+  font: inherit;
+  color: var(--xn-texto);
+  background: var(--xn-superficie);
+  border: 1px solid var(--xn-borde);
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+main {
+  max-width: 850px;
+  margin: auto;
+  padding: 80px 24px;
+}
+.antetitulo {
+  font-size: 14px;
+  color: var(--xn-tenue);
+}
+h1 {
+  font-size: clamp(40px, 6vw, 74px);
+  line-height: 1.04;
+  letter-spacing: -0.03em;
+  font-weight: 600;
+  margin: 25px 0;
+}
+h2 {
+  font-size: 21px;
+  letter-spacing: -0.6px;
+  font-weight: 600;
+}
+p,
+li {
+  color: var(--xn-tenue);
+  font-size: 14px;
+}
+.tarjeta {
+  background: var(--xn-superficie);
+  border: 1px solid var(--xn-borde);
+  padding: 30px;
+  border-radius: 18px;
+  margin: 30px 0;
+}
+.tarjeta h2 {
+  margin: 0 0 20px;
+}
+.tarjeta ol {
+  padding-left: 18px;
+}
+.tarjeta li {
+  margin-bottom: 15px;
+}
+.boton {
+  display: inline-block;
+  margin-top: 20px;
+  background: var(--xn-accion);
+  color: var(--xn-accion-texto);
+  font-weight: 600;
+  padding: 15px 22px;
+  border-radius: var(--xn-radio-m);
+  text-decoration: none;
+}
+.boton:hover {
+  background: var(--xn-accion-cursor);
+}
+.pequeno {
+  font-size: 12px;
+}
+.huella {
+  overflow-wrap: anywhere;
+  font-family: var(--xn-mono);
+}
+.volver {
+  display: inline-block;
+  margin-top: 30px;
+}
+footer {
+  padding: 30px 6%;
+  border-top: 1px solid var(--xn-borde);
+  font-size: 12px;
+  color: var(--xn-tenue);
+}
+[hidden] {
+  display: none !important;
+}
+@media (max-width: 500px) {
+  header {
+    flex-wrap: wrap;
+  }
+  main {
+    padding-top: 50px;
+  }
+  .tarjeta {
+    padding: 24px;
+  }
+}

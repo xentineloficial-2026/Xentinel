@@ -1,0 +1,36 @@
+# Secretos y datos reales: nunca entran al repositorio.
+xentinel-privado/
+.env
+.env.*
+!.env.example
+*.dump
+*.jks
+*.keystore
+*.pem
+key.properties
+Xentinel.sql
+Xentinel app/config/demo.local.json
+Xentinel app/config/production.json
+Xentinel web/BackEnd/static/
+
+# Instaladores y material de trabajo.
+*.apk
+*.ipa
+# Excepción: la APK publicada debe viajar con la web para que la página de descarga funcione.
+!Xentinel web/FrontEnd/public/downloads/*.apk
+logo Xentinel.jpeg
+capturas-rediseno/
+.claude/
+.agents/
+skills-lock.json
+.impeccable/
+
+# Dependencias y compilados.
+node_modules/
+.venv/
+__pycache__/
+dist/
+build/
+.dart_tool/
+.flutter-plugins-dependencies
+.ruff_cache/

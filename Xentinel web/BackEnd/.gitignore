@@ -1,0 +1,9 @@
+node_modules/
+.env
+.test-postgres/
+.npm-cache/
+coverage/
+*.log
+__pycache__/
+.venv/
+.ruff_cache/

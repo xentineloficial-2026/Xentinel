@@ -1,0 +1,32 @@
+{
+  "name": "xentinel-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "python -m xentinel servir",
+    "dev": "python -m xentinel servir --recargar",
+    "migrate": "python -m xentinel migrar",
+    "test": "node --test --test-concurrency=1 test/*.test.js",
+    "export-sql": "python -m xentinel exportar-sql",
+    "format:check": "prettier --check src scripts test clients public docs README.md package.json",
+    "bootstrap-admin": "python -m xentinel crear-admin",
+    "legacy:start": "node --env-file-if-exists=.env src/server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "nodemailer": "^10.1.7",
+    "pg": "^8.16.3",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.10"
+  }
+}

@@ -1,0 +1,32 @@
+/* Reset compartido: no impone colores ni tipografía propios a cada módulo. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  font-family: var(--xn-fuente);
+  line-height: 1.5;
+}
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+a {
+  color: inherit;
+}
+button:disabled {
+  opacity: 0.6;
+}
+img {
+  max-width: 100%;
+}

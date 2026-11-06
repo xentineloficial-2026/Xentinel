@@ -1,0 +1,111 @@
+/** Controles de catálogo, reportes y filtros que reutilizan el tema del panel. */
+.xn-admin-acciones,
+.xn-admin-filtros {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+}
+.xn-admin-filtros {
+  margin-bottom: 1rem;
+}
+.xn-admin-filtros button[aria-pressed='true'] {
+  color: var(--xn-accion-texto);
+  background: var(--xn-accion);
+  border-color: var(--xn-accion);
+}
+.xn-admin-total {
+  font-variant-numeric: tabular-nums;
+}
+.xn-franja-resumen.xn-franja-resumen--sin-escena {
+  display: block;
+}
+.xn-admin-programas {
+  display: grid;
+  gap: 0.8rem;
+  margin-bottom: 1rem;
+}
+.xn-tarjeta-academica.xn-admin-programa {
+  padding: 0;
+}
+.xn-admin-programa > h2 {
+  margin: 0;
+}
+.xn-admin-programa-selector {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  padding: 1rem 1.25rem;
+  background: transparent;
+  border: 0;
+  border-radius: inherit;
+}
+.xn-admin-programa-selector small {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.75rem;
+}
+.xn-admin-programa-selector[aria-expanded='true'] svg {
+  transform: rotate(180deg);
+}
+.xn-admin-programa-detalle {
+  padding: 1rem 1.25rem 1.25rem;
+}
+.xn-admin-detalle-cabecera {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.xn-admin-detalle-cabecera h3 {
+  margin: 0;
+}
+.xn-admin-datos {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.35rem 1rem;
+}
+.xn-admin-datos dt {
+  font-weight: 700;
+}
+.xn-admin-datos dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.xn-admin-lista {
+  list-style: none;
+  padding: 0;
+}
+.xn-admin-lista--anidada {
+  padding-inline-start: 1rem;
+}
+.xn-admin-lista summary {
+  cursor: pointer;
+  padding-block: 0.65rem;
+  border-top: 1px solid var(--xn-borde);
+}
+.xn-admin-campos {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.xn-admin-ficha-editor,
+.xn-admin-horario-editor {
+  min-width: 0;
+  margin: 0 0 0.9rem;
+  padding: 0.8rem;
+  border: 1px solid var(--xn-borde);
+  border-radius: 0.7rem;
+}
+.xn-admin-ficha-editor legend,
+.xn-admin-horario-editor legend {
+  padding-inline: 0.35rem;
+  font-weight: 700;
+}
