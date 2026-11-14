@@ -1,0 +1,141 @@
+=====================================================================
+  XENTINEL - COMO EJECUTAR EL PROYECTO EN OTRO COMPUTADOR
+=====================================================================
+
+El proyecto tiene 3 partes que se ejecutan por separado:
+  1. Base de datos (PostgreSQL)
+  2. Backend (FastAPI, Python)       -> carpeta "Xentinel web/BackEnd"
+  3. Web (React + Vite)              -> carpeta "Xentinel web/FrontEnd"
+  4. App movil (Flutter), opcional   -> carpeta "Xentinel app"
+
+El ZIP no trae las carpetas node_modules, .venv, build, dist ni
+.dart_tool. Son pesadas, rompen la compresion en Windows y se
+regeneran solas con los pasos de abajo.
+
+---------------------------------------------------------------------
+0. PROGRAMAS QUE DEBES INSTALAR (una sola vez)
+---------------------------------------------------------------------
+  - PostgreSQL 18     https://www.postgresql.org/download/
+  - Python 3.14       https://www.python.org/downloads/
+                      (marca "Add python.exe to PATH" al instalar)
+  - Node.js 22 o 24   https://nodejs.org/
+  - Git               https://git-scm.com/  (opcional, para colaborar)
+  - Flutter           https://docs.flutter.dev/get-started/install
+                      (solo si vas a trabajar en la app movil)
+
+Descomprime el ZIP en una ruta CORTA, por ejemplo:
+  C:\xentinel
+Las rutas largas de Windows causan errores al instalar dependencias.
+
+---------------------------------------------------------------------
+1. BASE DE DATOS
+---------------------------------------------------------------------
+Opcion A - Base con los datos actuales (respaldo incluido):
+  1. Abre "SQL Shell (psql)" o pgAdmin y crea la base:
+         CREATE DATABASE xentinel;
+  2. Restaura el respaldo desde la carpeta del proyecto:
+         psql -U postgres -d xentinel -f Xentinel.sql
+
+Opcion B - Base vacia:
+  Solo crea la base (CREATE DATABASE xentinel;). El paso 2 crea las
+  tablas, y luego creas un administrador (ver paso 2.6).
+
+---------------------------------------------------------------------
+2. BACKEND (en una terminal)
+---------------------------------------------------------------------
+  cd "Xentinel web\BackEnd"
+
+  2.1 Crear el entorno de Python e instalar dependencias:
+         python -m venv .venv
+         .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+
+  2.2 Revisar el archivo .env (ya viene en el ZIP).
+      Cambia en DATABASE_URL el usuario y la clave de TU PostgreSQL:
+         DATABASE_URL=postgresql://postgres:TU_CLAVE@127.0.0.1:5432/xentinel
+      Si no existe .env, copia .env.example como .env y genera los
+      secretos con:
+         python -c "import secrets;print(secrets.token_hex(48))"   -> JWT_SECRET
+         python -c "import secrets;print(secrets.token_hex(32))"   -> MAIL_ENCRYPTION_KEY
+
+  2.3 Preparar las tablas:
+         .\.venv\Scripts\python.exe -m xentinel migrar
+
+  2.4 Iniciar el servidor:
+         .\.venv\Scripts\python.exe -m xentinel servir
+
+  2.5 Comprobar: abre http://127.0.0.1:8000/ready
+      Debe responder {"status":"ready"}.
+
+  2.6 (Solo con base vacia) Crear el primer administrador.
+      En PowerShell, con el servidor detenido o en otra terminal:
+         $env:ADMIN_NAME="Nombre Apellido"
+         $env:ADMIN_DOCUMENT="123456789"
+         $env:ADMIN_EMAIL="correo@ejemplo.com"
+         $env:ADMIN_PASSWORD="UnaClaveLargaYSegura-2026"
+         .\.venv\Scripts\python.exe -m xentinel crear-admin
+
+---------------------------------------------------------------------
+3. WEB (en OTRA terminal, con el backend encendido)
+---------------------------------------------------------------------
+  cd "Xentinel web\FrontEnd"
+  npm ci
+  npm run dev
+
+  Abre http://localhost:5173
+
+  IMPORTANTE: la web debe correr en el puerto 5173. El backend solo
+  acepta ese origen (variable WEB_ORIGINS del .env). Si sale un aviso
+  de puerto ocupado, cierra lo que use el 5173 y vuelve a intentar.
+
+  Para ver la web con datos de demostracion, SIN backend ni base:
+     npm run qa:preview
+     Abre http://localhost:5176
+     Usuarios: admin-demo, instructor-demo, celador-demo, visitante-demo
+     Clave de todos: demo-password-12
+
+---------------------------------------------------------------------
+4. APP MOVIL (opcional)
+---------------------------------------------------------------------
+  cd "Xentinel app"
+  flutter pub get
+
+  Con el emulador de Android abierto (el backend en el mismo PC):
+     flutter run --dart-define-from-file=config/development.example.json
+
+  En un celular fisico conectado a la misma red Wi-Fi:
+     1. Mira la IP del PC con:  ipconfig   (ej. 192.168.1.40)
+     2. En la pantalla de inicio de la app, toca "Configurar servidor"
+        y escribe:  192.168.1.40:8000
+     3. Permite el puerto 8000 en el firewall de Windows si no conecta.
+
+  Pruebas de la app:   flutter test
+
+---------------------------------------------------------------------
+5. PRUEBAS DE LA WEB
+---------------------------------------------------------------------
+  cd "Xentinel web\FrontEnd"
+  npm test
+  npm run lint
+
+---------------------------------------------------------------------
+PROBLEMAS COMUNES
+---------------------------------------------------------------------
+- Login con error 403: la web no esta en el puerto 5173.
+- "Configuracion invalida" al iniciar el backend: falta o esta mal un
+  valor del .env (DATABASE_URL, JWT_SECRET de 64+ caracteres, etc.).
+- "Ejecute python -m xentinel migrar antes de iniciar": corre el 2.3.
+- Errores de certificado en Git o npm con antivirus (Avast, etc.):
+  el antivirus inspecciona HTTPS. Para Git, dentro del proyecto:
+     git config http.sslBackend schannel
+- La app no conecta: celular y PC en la misma Wi-Fi, backend encendido
+  y puerto 8000 permitido en el firewall.
+
+---------------------------------------------------------------------
+SEGURIDAD
+---------------------------------------------------------------------
+Este ZIP incluye la carpeta xentinel-privado, los .env y Xentinel.sql,
+con claves y datos personales reales. Compartelo solo con tu grupo y
+no lo subas a internet ni a repositorios publicos.
+
+Guia para publicar en internet (Render, Neon, Brevo): DESPLIEGUE.md
+=====================================================================

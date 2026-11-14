@@ -38,7 +38,7 @@ async function restablecerContrasena(token, correo, contrasena) {
 }
 export { restablecerContrasena };
 function errorContrasena(valor) {
-  if (valor.length < 12) return 'Usa al menos 12 caracteres.';
+  if (valor.length < 6) return 'Usa al menos 6 caracteres.';
   if (new TextEncoder().encode(valor).length > 72)
     return 'La contraseña supera el máximo de 72 bytes. Usa una más corta.';
   return '';

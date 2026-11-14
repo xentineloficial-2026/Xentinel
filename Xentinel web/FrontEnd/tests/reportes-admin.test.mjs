@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import Excel from 'exceljs';
 import {
+  generarCsv,
   generarExcel,
-  generarPdf,
 } from '../src/modulos/admin/archivosReporte.js';
 import {
   consultarReporte,
   fechaBogota,
   reporteAccesos,
+  reporteAsistenciaPeriodo,
   reporteHorarios,
 } from '../src/modulos/admin/reportes.js';
 
@@ -61,7 +62,7 @@ test('los lotes de exportación comparten un límite y rechazan respuestas parci
   );
 });
 
-test('el PDF tiene varias páginas y conserva el último movimiento', async () => {
+test('el CSV conserva todos los movimientos, incluido el último', async () => {
   const accesos = Array.from({ length: 101 }, (_, indice) => ({
     id_acceso: indice + 1,
     fechahora: '2026-11-04T05:00:00Z',
@@ -70,11 +71,39 @@ test('el PDF tiene varias páginas y conserva el último movimiento', async () =
     metodo: 'Manual',
     estado: 'Permitido',
   }));
-  const archivo = await generarPdf(reporteAccesos('2026-11-04', accesos));
-  const contenido = Buffer.from(await archivo.arrayBuffer()).toString('latin1');
-  assert.match(contenido, /^%PDF-/);
-  assert.ok((contenido.match(/\/Type \/Page\b/g) || []).length > 1);
+  const archivo = generarCsv(reporteAccesos('2026-11-04', accesos));
+  const contenido = await archivo.text();
+  assert.equal(contenido.trim().split('\r\n').length, 102);
   assert.match(contenido, /90200/);
+});
+
+test('la frecuencia por periodo exporta el resumen y el historial del aprendiz', () => {
+  const persona = {
+    id_usuarios: 7,
+    nombres_completos: 'Ana Prueba',
+    tipo_documento: 'TI',
+    numero_documento: '1001',
+    dias: 4,
+    presentes: 2,
+    retrasos: 1,
+    sin_registro: 1,
+    asistencia: 75,
+    puntualidad: 67,
+  };
+  const base = {
+    rango: { desde: '2026-11-02', hasta: '2026-11-08' },
+    nombre: 'semana',
+    numeroFicha: '3',
+    resumen: [persona],
+  };
+  const resumen = reporteAsistenciaPeriodo({ ...base, detalle: [] });
+  assert.equal(resumen.filas[0][8], 67);
+  const historial = reporteAsistenciaPeriodo({
+    ...base,
+    persona,
+    detalle: [{ fecha: '2026-11-02', estado_asistencia: 'Retrasado' }],
+  });
+  assert.deepEqual(historial.filas[0], ['2026-11-02', '', '', 'Retrasado']);
 });
 
 test('Excel abre como .xlsx y conserva valores con formato de texto', async () => {

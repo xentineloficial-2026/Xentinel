@@ -1,6 +1,7 @@
 """Cabeceras, CORS y límites compartidos sin almacenar las respuestas SSE en memoria."""
 
 import logging
+import re
 from hashlib import sha256
 from uuid import uuid4
 
@@ -16,6 +17,9 @@ from .http import ErrorAPI
 
 LOG = logging.getLogger(__name__)
 MAXIMO_CUERPO = 64 * 1024
+# Solo la subida de la foto de perfil admite archivos de hasta 3 MB.
+MAXIMO_FOTO = 3 * 1024 * 1024 + 4096
+RUTA_FOTO = re.compile(r"^/api/v1/usuarios/\d+/foto$")
 METODOS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 RUTAS_AUTH = {
     "/login",
@@ -229,7 +233,8 @@ class ProteccionHTTP:
                 if ruta == "/api/v1/alertas/sos" and metodo == "POST":
                     await run_in_threadpool(contar_peticion, db, ip, "sos", 30, 60)
             if metodo in ("POST", "PUT", "PATCH", "DELETE"):
-                receive = await self.limitar_cuerpo(cabeceras, receive)
+                maximo = MAXIMO_FOTO if RUTA_FOTO.match(ruta) else MAXIMO_CUERPO
+                receive = await self.limitar_cuerpo(cabeceras, receive, maximo)
             await self.app(scope, receive, enviar)
         except ErrorAPI as error:
             if respondido:
@@ -254,7 +259,7 @@ class ProteccionHTTP:
         return cadena[max(0, len(cadena) - 1 - saltos)]
 
     @staticmethod
-    async def limitar_cuerpo(cabeceras, receive):
+    async def limitar_cuerpo(cabeceras, receive, maximo=MAXIMO_CUERPO):
         def demasiado_grande():
             return ErrorAPI(413, "PAYLOAD_TOO_LARGE", "Solicitud demasiado grande")
 
@@ -262,7 +267,7 @@ class ProteccionHTTP:
         if (
             longitud.isascii()
             and longitud.isdecimal()
-            and (len(longitud) > 8 or int(longitud) > MAXIMO_CUERPO)
+            and (len(longitud) > 8 or int(longitud) > maximo)
         ):
             raise demasiado_grande()
         cuerpo = bytearray()
@@ -275,7 +280,7 @@ class ProteccionHTTP:
 
                 return desconectado
             contenido = parte.get("body", b"")
-            if len(cuerpo) + len(contenido) > MAXIMO_CUERPO:
+            if len(cuerpo) + len(contenido) > maximo:
                 raise demasiado_grande()
             cuerpo.extend(contenido)
             if not parte.get("more_body"):

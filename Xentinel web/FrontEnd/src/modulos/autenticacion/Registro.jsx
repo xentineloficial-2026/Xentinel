@@ -159,7 +159,7 @@ function Registro() {
               autocompletado="new-password"
               valor={formulario.contrasena}
               alCambiar={(evento) => cambiar('contrasena', evento.target.value)}
-              ayuda="Usa al menos 12 caracteres; máximo 72 bytes UTF-8."
+              ayuda="Usa al menos 6 caracteres; máximo 72 bytes UTF-8."
             />
             <CampoContrasena
               identificador="register-confirmation"

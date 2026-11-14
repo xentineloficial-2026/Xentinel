@@ -91,6 +91,7 @@ export function reporteAccesos(fecha, accesos) {
   }
   return {
     titulo: 'Historial diario de accesos',
+    hoja: 'Accesos',
     subtitulo: `${fecha} · Hora de Bogotá · ${ordenados.length} movimientos`,
     archivo: `xentinel-accesos-${fecha}`,
     columnas: ['Hora', 'ID de usuario', 'Movimiento', 'Método', 'Resultado'],
@@ -107,6 +108,7 @@ export function reporteAccesos(fecha, accesos) {
 export function reporteAsistencia(fecha, filas, numeroFicha) {
   return {
     titulo: 'Lista de asistencia',
+    hoja: 'Asistencia',
     subtitulo: `${fecha} · ${numeroFicha ? `Ficha ${numeroFicha}` : 'Todas las fichas'} · ${filas.length} aprendices`,
     archivo: `xentinel-asistencia-${numeroFicha ?? 'fichas'}-${fecha}`,
     columnas: [
@@ -132,9 +134,65 @@ export function reporteAsistencia(fecha, filas, numeroFicha) {
   };
 }
 
+/** Frecuencia de llegadas de una semana o un mes; con aprendiz elegido, su historial día a día. */
+export function reporteAsistenciaPeriodo({
+  rango,
+  nombre,
+  numeroFicha,
+  resumen,
+  detalle,
+  persona,
+}) {
+  const base = {
+    subtitulo: `${nombre} · Ficha ${numeroFicha ?? ''}`,
+    hoja: 'Asistencia',
+  };
+  if (persona && detalle.length)
+    return {
+      ...base,
+      titulo: `Asistencia de ${persona.nombres_completos}`,
+      archivo: `xentinel-asistencia-${persona.numero_documento}-${rango.desde}-${rango.hasta}`,
+      columnas: ['Fecha', 'Entrada', 'Salida', 'Estado'],
+      filas: detalle.map((fila) => [
+        fila.fecha,
+        fila.hora_entrada?.slice(0, 5) ?? '',
+        fila.hora_salida?.slice(0, 5) ?? '',
+        fila.estado_asistencia,
+      ]),
+    };
+  return {
+    ...base,
+    titulo: 'Frecuencia de asistencia',
+    archivo: `xentinel-frecuencia-${numeroFicha ?? 'ficha'}-${rango.desde}-${rango.hasta}`,
+    columnas: [
+      'Aprendiz',
+      'Tipo',
+      'Documento',
+      'Días de clase',
+      'Presente',
+      'Retrasado',
+      'Sin registro',
+      'Asistencia %',
+      'Puntualidad %',
+    ],
+    filas: resumen.map((fila) => [
+      fila.nombres_completos,
+      fila.tipo_documento,
+      fila.numero_documento,
+      fila.dias,
+      fila.presentes,
+      fila.retrasos,
+      fila.sin_registro,
+      fila.asistencia,
+      fila.puntualidad,
+    ]),
+  };
+}
+
 export function reporteHorarios(horarios, programa) {
   return {
     titulo: 'Horarios de formación',
+    hoja: 'Horarios',
     subtitulo: programa ? programa.nombre_programa : 'Todos los programas',
     archivo: programa
       ? `xentinel-horarios-programa-${programa.id_programa}`

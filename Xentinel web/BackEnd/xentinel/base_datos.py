@@ -8,7 +8,12 @@ from psycopg_pool import ConnectionPool
 
 from .configuracion import RAIZ
 
-VERSIONES = ("001_base", "002_security_realtime", "003_programas_admin")
+VERSIONES = (
+    "001_base",
+    "002_security_realtime",
+    "003_programas_admin",
+    "004_perfil_asistencia",
+)
 
 
 class Consultas:
@@ -79,6 +84,8 @@ def verificar_esquema(db):
         "SELECT id_reporte, id_usuarios, presente FROM reporte_estudiantes LIMIT 0",
         "SELECT hits, expires_at FROM api_rate_limits LIMIT 0",
         "SELECT activo FROM programa LIMIT 0",
+        "SELECT modificado_por, modificado_en FROM asistencia LIMIT 0",
+        "SELECT contenido FROM usuario_foto LIMIT 0",
     ):
         db.ejecutar(consulta)
 

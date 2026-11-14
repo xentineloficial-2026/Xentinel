@@ -5,7 +5,7 @@ import {
   useRef as useReferencia,
   useState as useEstado,
 } from 'react';
-import { SimboloXentinel } from '../identidad/Marca.jsx';
+import { EscudoXentinel } from '../identidad/Marca.jsx';
 
 export function EscenaPrincipal({ ref }) {
   const contenedor = useReferencia(null);
@@ -46,7 +46,7 @@ export function EscenaPrincipal({ ref }) {
   }, []);
   return (
     <div ref={contenedor} className="xn-cine-lienzo" aria-hidden="true">
-      {sinWebgl && <SimboloXentinel className="xn-cine-respaldo" />}
+      {sinWebgl && <EscudoXentinel className="xn-cine-respaldo" />}
     </div>
   );
 }

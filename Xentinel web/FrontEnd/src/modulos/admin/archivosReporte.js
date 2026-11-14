@@ -1,38 +1,9 @@
-/** Genera PDF paginado, hojas .xlsx y CSV con valores de texto, nunca fórmulas. */
-export async function generarPdf(reporte) {
-  const [{ jsPDF: DocumentoPdf }, { autoTable: tablaPdf }] = await Promise.all([
-    import('jspdf'),
-    import('jspdf-autotable'),
-  ]);
-  const documento = new DocumentoPdf({
-    orientation: reporte.columnas.length > 5 ? 'landscape' : 'portrait',
-  });
-  documento.setProperties({ title: reporte.titulo, author: 'Xentinel' });
-  documento.setFontSize(17);
-  documento.text(reporte.titulo, 14, 16);
-  documento.setFontSize(10);
-  const subtitulo = documento.splitTextToSize(
-    reporte.subtitulo,
-    documento.internal.pageSize.width - 28
-  );
-  documento.text(subtitulo, 14, 23);
-  tablaPdf(documento, {
-    startY: 26 + subtitulo.length * 4,
-    head: [reporte.columnas],
-    body: reporte.filas,
-    showHead: 'everyPage',
-    rowPageBreak: 'avoid',
-    headStyles: { fillColor: [20, 61, 124] },
-    styles: { fontSize: 9, overflow: 'linebreak' },
-  });
-  return documento.output('blob');
-}
-
+/** Genera hojas .xlsx y CSV con valores de texto, nunca fórmulas. */
 export async function generarExcel(reporte) {
   const { default: Excel } = await import('exceljs/dist/exceljs.min.js');
   const libro = new Excel.Workbook();
   libro.creator = 'Xentinel';
-  const hoja = libro.addWorksheet('Horarios', {
+  const hoja = libro.addWorksheet(reporte.hoja || 'Reporte', {
     views: [{ state: 'frozen', ySplit: 1 }],
   });
   hoja.columns = reporte.columnas.map((header, indice) => ({
@@ -68,11 +39,7 @@ export function generarCsv(reporte) {
 
 export async function descargarReporte(reporte, formato) {
   const archivo =
-    formato === 'pdf'
-      ? await generarPdf(reporte)
-      : formato === 'csv'
-        ? generarCsv(reporte)
-        : await generarExcel(reporte);
+    formato === 'csv' ? generarCsv(reporte) : await generarExcel(reporte);
   const enlace = document.createElement('a');
   enlace.href = URL.createObjectURL(archivo);
   enlace.download = `${reporte.archivo}.${formato}`;

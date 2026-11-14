@@ -1470,3 +1470,276 @@
     min-height: 72px;
   }
 }
+
+/* Perfil y personas: dos tarjetas, foto con estado a la izquierda y formulario a la derecha. */
+.xn-volver {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--xn-texto);
+  font: inherit;
+  font-size: clamp(26px, 2.4vw, 32px);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.xn-migas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 6px;
+  font-size: 14px;
+  color: var(--xn-tenue);
+}
+.xn-migas span + span::before {
+  content: '•';
+  margin-right: 10px;
+}
+.xn-migas span:last-child {
+  color: var(--xn-texto);
+}
+.xn-perfil-distribucion {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.xn-perfil-columna {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.xn-perfil-columna .xn-trabajo-tarjeta,
+.xn-perfil-distribucion > .xn-trabajo-tarjeta {
+  margin-bottom: 0;
+}
+.xn-perfil-lateral {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 20px;
+  padding-top: 40px;
+}
+.xn-perfil-lateral > .xn-estado {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+}
+.xn-perfil-identidad {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  text-align: center;
+}
+.xn-perfil-identidad strong {
+  font-size: 18px;
+  font-weight: 600;
+}
+.xn-perfil-identidad span {
+  font-size: 14px;
+  color: var(--xn-tenue);
+}
+.xn-perfil-acciones {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+.xn-foto {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  text-align: center;
+}
+.xn-foto-circulo {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 148px;
+  height: 148px;
+  padding: 8px;
+  border-radius: 50%;
+  border: 1px dashed var(--xn-borde);
+  cursor: pointer;
+}
+.xn-foto-circulo.esta-deshabilitado {
+  cursor: wait;
+  opacity: 0.7;
+}
+.xn-foto-circulo:focus-within {
+  outline: 2px solid var(--xn-azul);
+  outline-offset: 3px;
+}
+.xn-foto-circulo img,
+.xn-foto-vacia {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+}
+.xn-foto-circulo img {
+  object-fit: cover;
+}
+.xn-foto-vacia {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--xn-tenue);
+  background: var(--xn-superficie-alterna);
+  transition: background 0.16s;
+}
+.xn-foto-circulo:hover .xn-foto-vacia {
+  background: var(--xn-azul-suave);
+}
+.xn-foto-cambiar {
+  position: absolute;
+  inset: 8px;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 4px;
+  border-radius: 50%;
+  font-size: 13px;
+  color: #fff;
+  background: #06141bb3;
+  opacity: 0;
+  transition: opacity 0.16s;
+}
+.xn-foto-circulo:hover .xn-foto-cambiar,
+.xn-foto-circulo:focus-within .xn-foto-cambiar {
+  opacity: 1;
+}
+.xn-trabajo-contenido .xn-foto-ayuda {
+  font-size: 13px;
+  line-height: 1.5;
+}
+.xn-trabajo-contenido .xn-foto-error {
+  color: var(--xn-peligro);
+  font-size: 14px;
+}
+.xn-interruptor {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  text-align: left;
+}
+.xn-interruptor label {
+  font-size: 15px;
+  font-weight: 600;
+}
+.xn-trabajo-contenido .xn-interruptor p {
+  margin-top: 2px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.xn-interruptor button {
+  position: relative;
+  flex-shrink: 0;
+  width: 44px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 13px;
+  background: var(--xn-superficie-alterna);
+  transition: background 0.18s;
+}
+.xn-interruptor button span {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px #0005;
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.xn-interruptor button[aria-checked='true'] {
+  background: var(--xn-exito);
+}
+.xn-interruptor button[aria-checked='true'] span {
+  transform: translateX(18px);
+}
+.xn-boton--peligro-suave,
+.xn-espacio .xn-boton--peligro-suave {
+  align-self: center;
+  background: var(--xn-peligro-suave);
+  color: var(--xn-peligro);
+}
+.xn-boton--peligro-suave:hover {
+  background: var(--xn-peligro-suave);
+  color: var(--xn-peligro);
+  filter: brightness(1.15);
+}
+
+/* Registro manual: a quién corresponde el documento digitado. */
+.xn-trabajo-contenido .xn-persona-encontrada {
+  display: grid;
+  gap: 2px;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border-radius: var(--xn-radio-s);
+  background: var(--xn-azul-suave);
+  color: var(--xn-texto);
+  font-size: 14px;
+}
+
+/* Asistencia: estado editable y frecuencia del aprendiz elegido. */
+.xn-estado-editable {
+  display: inline-grid;
+  gap: 2px;
+}
+.xn-estado-editable select.xn-estado {
+  min-height: 30px;
+  padding: 3px 8px;
+  border: 0;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.xn-estado-editado {
+  font-size: 12px;
+  color: var(--xn-tenue);
+}
+.xn-frecuencia {
+  margin: 4px 0 16px;
+  padding: 16px;
+  border-radius: var(--xn-radio-m);
+  background: var(--xn-azul-suave);
+}
+.xn-frecuencia dl {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0 0;
+}
+.xn-frecuencia dt {
+  font-size: 13px;
+  color: var(--xn-tenue);
+}
+.xn-frecuencia dd {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 900px) {
+  .xn-perfil-distribucion {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .xn-frecuencia dl {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+.xn-perfil-distribucion .xn-formulario-cuadricula {
+  gap: 16px 18px;
+}
+.xn-perfil-distribucion .xn-formulario-cuadricula .xn-campo {
+  margin: 0;
+}

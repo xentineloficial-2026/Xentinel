@@ -1,4 +1,4 @@
-/** Registro de entradas/salidas con idempotencia y autorización del servidor; historial paginado. */
+/** Registro de entradas/salidas por QR o por documento digitado; idempotencia y autorización del servidor. */
 import { LectorCodigo } from './LectorCodigo.jsx';
 import { ExportarAccesos } from '../admin/ExportarAccesos.jsx';
 import { useRef as useReferencia, useState as useEstado } from 'react';
@@ -47,6 +47,28 @@ function ControlAccesos() {
   const [metodoRegistro, cambiarMetodoRegistro] = useEstado('Manual');
   /* identidadConfirmada, cambiarIdentidadConfirmada: estado de la vista y función para actualizarlo. */
   const [identidadConfirmada, cambiarIdentidadConfirmada] = useEstado(false);
+  /* persona: quién corresponde al documento digitado, para confirmarlo antes de registrar. */
+  const [persona, cambiarPersona] = useEstado(null);
+  /* buscarDocumento: sin QR, el documento se traduce al usuario en el servidor. */
+  const buscarDocumento = async (documento) => {
+    if (!/^[A-Za-z0-9-]{3,20}$/.test(documento)) {
+      cambiarRetroalimentacion({
+        error: 'Escribe el número de documento sin espacios ni puntos.',
+      });
+      return null;
+    }
+    try {
+      const { data } = await solicitar(
+        `/usuarios/documento/${encodeURIComponent(documento)}`
+      );
+      cambiarPersona(data);
+      return data;
+    } catch (error) {
+      cambiarPersona(null);
+      cambiarRetroalimentacion({ error });
+      return null;
+    }
+  };
   /* leerCodigo: operación local que atiende el evento o transforma la información. */
   const leerCodigo = (identificador) => {
     cambiarFormulario((actual) => ({
@@ -54,6 +76,7 @@ function ControlAccesos() {
       id_usuarios: String(identificador),
     }));
     cambiarMetodoRegistro('QR');
+    cambiarPersona(null);
     cambiarIdentidadConfirmada(false);
     operacion.current = null;
     cambiarRetroalimentacion({
@@ -72,7 +95,10 @@ function ControlAccesos() {
       [campo]: valor,
     }));
     operacion.current = null;
-    if (campo === 'id_usuarios') cambiarMetodoRegistro('Manual');
+    if (campo === 'id_usuarios') {
+      cambiarMetodoRegistro('Manual');
+      cambiarPersona(null);
+    }
     cambiarIdentidadConfirmada(false);
     cambiarRetroalimentacion({});
   };
@@ -80,15 +106,26 @@ function ControlAccesos() {
   const enviar = async (evento) => {
     evento.preventDefault();
     if (ocupado.current) return;
-    if (
-      !/^\d+$/.test(formulario.id_usuarios) ||
-      Number(formulario.id_usuarios) < 1 ||
-      Number(formulario.id_usuarios) > 2147483647
+    // Con QR llega el ID; a mano se digita el documento y el servidor indica a quién pertenece.
+    let identificador = Number(formulario.id_usuarios);
+    if (metodoRegistro === 'Manual') {
+      const encontrada =
+        persona?.numero_documento === formulario.id_usuarios.trim()
+          ? persona
+          : await buscarDocumento(formulario.id_usuarios.trim());
+      if (!encontrada) {
+        document.getElementById('access-user').focus();
+        return;
+      }
+      identificador = encontrada.id_usuarios;
+    } else if (
+      !Number.isSafeInteger(identificador) ||
+      identificador < 1 ||
+      identificador > 2147483647
     ) {
       cambiarRetroalimentacion({
-        error: 'Ingresa el ID de usuario válido de la credencial.',
+        error: 'El código leído no es válido. Escanéalo de nuevo.',
       });
-      document.getElementById('access-user').focus();
       return;
     }
     if (!identidadConfirmada) {
@@ -107,7 +144,7 @@ function ControlAccesos() {
       const { data: datos } = await solicitar('/ingresos', {
         method: 'POST',
         body: {
-          id_usuarios: Number(formulario.id_usuarios),
+          id_usuarios: identificador,
           tipo: formulario.tipo,
           metodo: metodoRegistro,
           request_id: operacion.current,
@@ -156,17 +193,35 @@ function ControlAccesos() {
           </p>
           <form className="xn-access-formulario" noValidate onSubmit={enviar}>
             <div className="xn-campo">
-              <label htmlFor="access-user">ID de usuario</label>
+              <label htmlFor="access-user">
+                {metodoRegistro === 'QR'
+                  ? 'ID leído del código'
+                  : 'Número de documento'}
+              </label>
               <input
                 id="access-user"
                 inputMode="numeric"
+                autoComplete="off"
                 value={formulario.id_usuarios}
                 onChange={(evento) =>
                   cambiar('id_usuarios', evento.target.value)
                 }
+                onBlur={() =>
+                  metodoRegistro === 'Manual' &&
+                  formulario.id_usuarios.trim() &&
+                  persona?.numero_documento !== formulario.id_usuarios.trim() &&
+                  buscarDocumento(formulario.id_usuarios.trim())
+                }
                 disabled={guardando}
-                placeholder="ID de la credencial"
+                placeholder="Documento, si no hay código QR"
               />
+              {persona && metodoRegistro === 'Manual' && (
+                <p className="xn-persona-encontrada" role="status">
+                  <strong>{persona.nombres_completos}</strong>
+                  {persona.nombre_rol} · {persona.tipo_documento}{' '}
+                  {persona.numero_documento} · {persona.estado}
+                </p>
+              )}
             </div>
             <div className="xn-campo">
               <label htmlFor="access-type">Movimiento</label>
@@ -197,7 +252,8 @@ function ControlAccesos() {
           </form>
           <MensajeEstado {...retroalimentacion} />
           <p className="xn-ayuda">
-            {rol === 'celador' && 'El código identifica al usuario. '}
+            {rol === 'celador' &&
+              'El código identifica al usuario; sin código, digita su documento. '}
             La autorización de acceso depende del estado de su cuenta y del
             registro del movimiento.
           </p>

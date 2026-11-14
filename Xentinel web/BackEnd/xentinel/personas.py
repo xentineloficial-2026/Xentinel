@@ -2,10 +2,11 @@
 
 from typing import Literal
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Request, Response
 from psycopg import sql
 
 from .autenticacion import (
+    Clave,
     Correo,
     Documento,
     FechaNacimiento,
@@ -18,6 +19,7 @@ from .http import Base, Entrada, ErrorAPI, Id, IdRuta, Paginacion, responder, te
 from .seguridad import (
     COLUMNAS_PERSONA,
     Administrador,
+    CeladorOAdmin,
     SesionActual,
     es_admin,
     hash_clave,
@@ -33,6 +35,8 @@ CAMPOS_PROPIOS = {"nombres_completos", "telefono", "fecha_nacimiento"}
 
 class AltaUsuario(Registro):
     id_rol: Id
+    # Piloto: sin contraseña escrita, la inicial es el número de documento.
+    contrasena: Clave | None = None
 
 
 class EdicionUsuario(Entrada):
@@ -87,10 +91,24 @@ def listar(
 
 @rutas.post("", status_code=201)
 def crear(datos: AltaUsuario, db: Base, sesion: Administrador):
-    hash_guardado = hash_clave(datos.contrasena)
+    hash_guardado = hash_clave(datos.contrasena or datos.numero_documento)
     with db.transaccion() as conexion:
         usuario = insertar_usuario(conexion, datos, hash_guardado, datos.id_rol)
     return responder(usuario_publico(usuario), 201)
+
+
+@rutas.get("/documento/{numero}")
+def por_documento(numero: Documento, db: Base, sesion: CeladorOAdmin):
+    """Sin QR, el celador digita el documento y confirma a quién registra."""
+    persona = db.fila(
+        """SELECT u.id_usuarios,u.nombres_completos,u.tipo_documento,u.numero_documento,
+        u.estado,r.nombre_rol FROM usuarios u JOIN rol r USING(id_rol)
+        WHERE u.numero_documento=%s ORDER BY lower(u.estado)='activo' DESC LIMIT 1""",
+        numero,
+    )
+    if not persona:
+        raise ErrorAPI(404, "NOT_FOUND", "No hay ninguna persona con ese documento")
+    return responder(persona)
 
 
 @rutas.get("/{id}")
@@ -148,4 +166,59 @@ def fichas_asignadas(id: IdRuta, db: Base, sesion: SesionActual):
             id,
             id,
         )
+    )
+
+
+# Firmas de archivo: el tipo se decide por el contenido, nunca por el nombre.
+FIRMAS_FOTO = {
+    bytes.fromhex("ffd8ff"): "image/jpeg",
+    bytes.fromhex("89504e470d0a1a0a"): "image/png",
+    b"GIF87a": "image/gif",
+    b"GIF89a": "image/gif",
+}
+MAXIMO_FOTO = 3 * 1024 * 1024
+
+
+@rutas.put("/{id}/foto")
+async def subir_foto(id: IdRuta, solicitud: Request, db: Base, sesion: SesionActual):
+    validar_titular(sesion, id)
+    contenido = await solicitud.body()
+    tipo = next(
+        (valor for firma, valor in FIRMAS_FOTO.items() if contenido.startswith(firma)),
+        None,
+    )
+    if not contenido or len(contenido) > MAXIMO_FOTO:
+        raise ErrorAPI(413, "PAYLOAD_TOO_LARGE", "La foto debe pesar máximo 3 MB")
+    if not tipo:
+        raise ErrorAPI(415, "UNSUPPORTED_MEDIA", "Usa una imagen JPG, PNG o GIF")
+    with db.transaccion() as conexion:
+        if not conexion.fila("SELECT 1 FROM usuarios WHERE id_usuarios=%s", id):
+            raise usuario_ausente()
+        conexion.ejecutar(
+            """INSERT INTO usuario_foto(id_usuarios,contenido,tipo) VALUES(%s,%s,%s)
+            ON CONFLICT (id_usuarios) DO UPDATE SET contenido=EXCLUDED.contenido,
+            tipo=EXCLUDED.tipo,actualizado_en=now()""",
+            id,
+            contenido,
+            tipo,
+        )
+        conexion.ejecutar(
+            """UPDATE usuarios SET foto_url='/api/v1/usuarios/'||id_usuarios||'/foto?v='||
+            floor(extract(epoch FROM now()))::bigint WHERE id_usuarios=%s""",
+            id,
+        )
+        usuario = usuario_por_id(conexion, id)
+    return responder(usuario_publico(usuario))
+
+
+@rutas.get("/{id}/foto")
+def ver_foto(id: IdRuta, db: Base, sesion: SesionActual):
+    validar_titular(sesion, id)
+    foto = db.fila("SELECT contenido,tipo FROM usuario_foto WHERE id_usuarios=%s", id)
+    if not foto:
+        raise ErrorAPI(404, "NOT_FOUND", "Esta persona no tiene foto")
+    return Response(
+        bytes(foto["contenido"]),
+        media_type=foto["tipo"],
+        headers={"Cache-Control": "private, max-age=300"},
     )

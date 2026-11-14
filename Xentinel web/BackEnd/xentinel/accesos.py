@@ -41,7 +41,7 @@ def registrar_asistencia(conexion, movimiento, zona):
             cursor.execute(
                 """INSERT INTO asistencia(id_usuarios,id_jornada,fecha,hora_entrada,estado)
                 SELECT af.id_usuarios,j.id_jornada,%(fecha)s,%(hora)s,
-                CASE WHEN %(hora)s::time<=j.hora_inicio THEN '✅ Presente' ELSE '⚠️ Tardanza' END
+                CASE WHEN %(hora)s::time<=j.hora_inicio THEN 'Presente' ELSE 'Retrasado' END
                 FROM aprendiz_ficha af JOIN jornada j ON j.id_ficha=af.id_ficha
                 WHERE af.id_usuarios=%(usuario)s
                 ORDER BY j.id_jornada DESC LIMIT 1

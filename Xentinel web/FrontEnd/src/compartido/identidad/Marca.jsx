@@ -1,8 +1,29 @@
-/** Marca Xentinel: escudo con candado y llave, redibujado en vector desde el logo oficial. */
+/** Marca Xentinel: la X oficial en la web; el escudo se conserva solo como respaldo del 3D. */
+import { useId as useIdentificador } from 'react';
 import { Link as Enlace } from 'react-router-dom';
 
-/** Símbolo aislado. Toma el color del texto para funcionar en ambos temas y sobre emergencias. */
+/** Logo oficial (X). Toma el color del texto para funcionar en ambos temas. */
 export function SimboloXentinel({ className }) {
+  const mascara = `xn-x-${useIdentificador().replace(/:/g, '')}`;
+  return (
+    <svg className={className} viewBox="0 0 1018 1106" aria-hidden="true">
+      <defs>
+        <mask id={mascara}>
+          <image href="/simbolo-x.png" width="1018" height="1106" />
+        </mask>
+      </defs>
+      <rect
+        width="1018"
+        height="1106"
+        fill="currentColor"
+        mask={`url(#${mascara})`}
+      />
+    </svg>
+  );
+}
+
+/** Escudo con candado: respaldo del escudo 3D cuando el navegador no tiene WebGL. */
+export function EscudoXentinel({ className }) {
   return (
     <svg
       className={className}

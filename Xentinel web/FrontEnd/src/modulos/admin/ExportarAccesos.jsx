@@ -10,7 +10,7 @@ export function ExportarAccesos() {
   const [fecha, cambiarFecha] = useState(fechaBogota);
   const [estado, cambiarEstado] = useState({});
   const [ocupado, cambiarOcupado] = useState(false);
-  const [formato, cambiarFormato] = useState('pdf');
+  const [formato, cambiarFormato] = useState('xlsx');
   const operacion = useRef(null);
   useEffect(() => () => operacion.current?.abort(), []);
 
@@ -18,7 +18,7 @@ export function ExportarAccesos() {
     evento.preventDefault();
     if (operacion.current) return;
     const elegido =
-      evento.nativeEvent.submitter?.value === 'csv' ? 'csv' : 'pdf';
+      evento.nativeEvent.submitter?.value === 'csv' ? 'csv' : 'xlsx';
     cambiarFormato(elegido);
     const controlador = new AbortController();
     operacion.current = controlador;
@@ -40,7 +40,7 @@ export function ExportarAccesos() {
       }
       await descargarReporte(reporteAccesos(fecha, accesos), elegido);
       cambiarEstado({
-        mensaje: `${elegido.toUpperCase()} descargado con ${accesos.length} movimientos.`,
+        mensaje: `${elegido === 'csv' ? 'CSV' : 'Excel'} descargado con ${accesos.length} movimientos.`,
       });
     } catch (error) {
       if (!controlador.signal.aborted) cambiarEstado({ error });
@@ -107,10 +107,10 @@ export function ExportarAccesos() {
                   ? 'Preparando CSV…'
                   : 'Descargar CSV'}
               </button>
-              <button className="xn-boton" value="pdf" disabled={ocupado}>
-                {ocupado && formato === 'pdf'
-                  ? 'Preparando PDF…'
-                  : 'Descargar PDF'}
+              <button className="xn-boton" value="xlsx" disabled={ocupado}>
+                {ocupado && formato === 'xlsx'
+                  ? 'Preparando Excel…'
+                  : 'Descargar Excel'}
               </button>
             </div>
           </form>

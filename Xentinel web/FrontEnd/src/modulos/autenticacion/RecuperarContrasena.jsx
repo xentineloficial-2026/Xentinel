@@ -271,7 +271,7 @@ function RestablecerContrasena() {
               etiqueta="Nueva contraseña"
               valor={contrasena}
               alCambiar={(evento) => cambiarContrasena(evento.target.value)}
-              ayuda="Entre 12 caracteres y 72 bytes UTF-8."
+              ayuda="Entre 6 caracteres y 72 bytes UTF-8."
               error={error}
             />
             <CampoContrasena

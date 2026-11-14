@@ -55,14 +55,6 @@ export function ExportarHorarios({ programa }) {
           type="button"
           className="xn-boton xn-boton--secundario"
           disabled={!!formato}
-          onClick={() => exportar('pdf')}
-        >
-          {formato === 'pdf' ? 'Preparando PDF…' : 'Exportar horarios PDF'}
-        </button>
-        <button
-          type="button"
-          className="xn-boton xn-boton--secundario"
-          disabled={!!formato}
           onClick={() => exportar('xlsx')}
         >
           {formato === 'xlsx' ? 'Preparando Excel…' : 'Exportar horarios Excel'}

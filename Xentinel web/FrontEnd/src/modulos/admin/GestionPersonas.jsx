@@ -1,4 +1,4 @@
-/** Directorio paginado con creación, edición y desactivación explícita; contratos de usuarios del API vigente. */
+/** Directorio paginado; crear y editar abren una vista de dos tarjetas con foto y estado de la cuenta. */
 import { useRef as useReferencia, useState as useEstado } from 'react';
 import { useRecurso } from '../../compartido/ganchos/useRecurso.js';
 import { solicitar } from '../../compartido/servicios/cliente.js';
@@ -7,6 +7,12 @@ import { useAutenticacion } from '../../compartido/contextos/autenticacion.js';
 import { errorContrasena } from '../../compartido/servicios/recuperacion.js';
 import { CampoContrasena } from '../../compartido/componentes/CampoContrasena.jsx';
 import { Dialogo } from '../../compartido/componentes/Dialogo.jsx';
+import {
+  FotoPerfil,
+  Interruptor,
+} from '../../compartido/componentes/FotoPerfil.jsx';
+import { subirFoto } from '../../compartido/servicios/fotos.js';
+import { ChevronLeft as Volver } from 'lucide-react';
 import {
   MensajeEstado,
   EstadoConsulta,
@@ -28,7 +34,7 @@ const personaVacia = {
   id_rol: '',
   estado: 'Activo',
 };
-function EditorPersona({ usuario, alCerrar, alGuardar }) {
+function EditorPersona({ usuario, alCerrar, alGuardar, alDesactivar }) {
   /* editando: valor de trabajo utilizado en esta operación. */
   const editando = !!usuario?.id_usuarios;
   /* formulario, cambiarFormulario: estado de la vista y función para actualizarlo. */
@@ -37,6 +43,8 @@ function EditorPersona({ usuario, alCerrar, alGuardar }) {
     ...usuario,
     fecha_nacimiento: usuario?.fecha_nacimiento?.slice(0, 10) || '',
   }));
+  /* foto: archivo elegido; se sube después de guardar los datos. */
+  const [foto, cambiarFoto] = useEstado(null);
   /* roles: consulta cancelable al servidor, con datos, estado y reintento. */
   const roles = useRecurso('/roles?limit=100');
   /* esAprendiz: la situación formativa solo aplica a aprendices. */
@@ -81,7 +89,9 @@ function EditorPersona({ usuario, alCerrar, alGuardar }) {
       ['id_rol', !formulario.id_rol, 'Selecciona un rol.'],
       [
         'contrasena',
-        !editando && !!errorContrasena(formulario.contrasena),
+        !editando &&
+          !!formulario.contrasena &&
+          !!errorContrasena(formulario.contrasena),
         errorContrasena(formulario.contrasena),
       ],
     ];
@@ -112,20 +122,30 @@ function EditorPersona({ usuario, alCerrar, alGuardar }) {
               ? { situacion_formativa: formulario.situacion_formativa }
               : {}),
           }
-        : {
-            contrasena: formulario.contrasena,
-          }),
+        : formulario.contrasena
+          ? { contrasena: formulario.contrasena }
+          : {}),
     };
     ocupado.current = true;
     cambiarGuardando(true);
     try {
-      await solicitar(
+      const { data: guardado } = await solicitar(
         editando ? `/usuarios/${usuario.id_usuarios}` : '/usuarios',
         {
           method: editando ? 'PATCH' : 'POST',
           body: cuerpo,
         }
       );
+      if (foto) {
+        try {
+          await subirFoto(guardado.id_usuarios, foto);
+        } catch (motivo) {
+          cambiarError(
+            `Los datos se guardaron, pero la foto no: ${motivo.message}`
+          );
+          return;
+        }
+      }
       alGuardar();
     } catch (motivo) {
       cambiarError(motivo);
@@ -134,148 +154,203 @@ function EditorPersona({ usuario, alCerrar, alGuardar }) {
       cambiarGuardando(false);
     }
   };
+  /* campo: entrada del formulario con su etiqueta, en la cuadrícula de dos columnas. */
+  const campo = (clave, etiqueta, tipo = 'text', extra = {}) => (
+    <div className="xn-campo" key={clave}>
+      <label htmlFor={`user-${clave}`}>{etiqueta}</label>
+      <input
+        id={`user-${clave}`}
+        type={tipo}
+        value={formulario[clave] || ''}
+        onChange={(evento) => cambiar(clave, evento.target.value)}
+        disabled={guardando}
+        {...extra}
+      />
+    </div>
+  );
   return (
-    <Dialogo
-      titulo={editando ? 'Editar persona' : 'Agregar persona'}
-      alCerrar={alCerrar}
-      ocupado={guardando}
-    >
-      <form noValidate onSubmit={enviar}>
-        <div className="xn-formulario-cuadricula">
-          {[
-            ['nombres_completos', 'Nombre completo', 'text'],
-            ['numero_documento', 'Documento', 'text'],
-            ['correo', 'Correo electrónico', 'email'],
-            ['telefono', 'Teléfono', 'tel'],
-            ['fecha_nacimiento', 'Fecha de nacimiento', 'date'],
-          ].map(([clave, etiqueta, tipo]) => (
-            <div className="xn-campo" key={clave}>
-              <label htmlFor={`user-${clave}`}>{etiqueta}</label>
-              <input
-                id={`user-${clave}`}
-                type={tipo}
-                value={formulario[clave] || ''}
-                onChange={(evento) => cambiar(clave, evento.target.value)}
-                required={[
-                  'nombres_completos',
-                  'numero_documento',
-                  'correo',
-                ].includes(clave)}
-              />
-            </div>
-          ))}
-          <div className="xn-campo">
-            <label htmlFor="user-document-type">Tipo de documento</label>
-            <select
-              id="user-document-type"
-              value={formulario.tipo_documento}
-              onChange={(evento) =>
-                cambiar('tipo_documento', evento.target.value)
-              }
-            >
-              {['CC', 'TI', 'CE', 'PA', 'PEP', 'PPT'].map((tipo) => (
-                <option key={tipo}>{tipo}</option>
-              ))}
-            </select>
-          </div>
-          <div className="xn-campo">
-            <label htmlFor="user-id_rol">Rol</label>
-            <select
-              id="user-id_rol"
-              value={formulario.id_rol}
-              onChange={(evento) => cambiar('id_rol', evento.target.value)}
-            >
-              <option value="">Seleccionar rol</option>
-              {roles.datos?.map((rol) => (
-                <option key={rol.id_rol} value={rol.id_rol}>
-                  {rol.nombre_rol}
-                </option>
-              ))}
-            </select>
-            {roles.estado === 'error' && (
-              <button
-                type="button"
-                className="xn-enlace-boton xn-texto-enlace"
-                onClick={roles.actualizar}
-              >
-                Reintentar carga de roles
-              </button>
-            )}
-          </div>
-          {editando && (
-            <div className="xn-campo">
-              <label htmlFor="user-state">Estado</label>
-              <select
-                id="user-state"
-                value={formulario.estado}
-                onChange={(evento) => cambiar('estado', evento.target.value)}
-              >
-                <option>Activo</option>
-                <option>Inactivo</option>
-              </select>
-            </div>
-          )}
-          {editando && esAprendiz && (
-            <div className="xn-campo">
-              <label htmlFor="user-situacion">Situación formativa</label>
-              <select
-                id="user-situacion"
-                value={formulario.situacion_formativa || ''}
-                onChange={(evento) =>
-                  cambiar('situacion_formativa', evento.target.value)
-                }
-              >
-                <option value="" disabled>
-                  Seleccionar
-                </option>
-                <option>En inducción</option>
-                <option>En formación</option>
-                <option>Desertado</option>
-                <option>Retirado</option>
-              </select>
-              {['Desertado', 'Retirado'].includes(
-                formulario.situacion_formativa
-              ) && (
-                <p className="xn-ayuda">
-                  Sale de la lista de su ficha y no podrá ingresar a la sede. Su
-                  historial se conserva y puedes revertirlo.
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-        {!editando && (
-          <CampoContrasena
-            identificador="user-contrasena"
-            etiqueta="Contraseña inicial"
-            valor={formulario.contrasena}
-            alCambiar={(evento) => cambiar('contrasena', evento.target.value)}
-            ayuda="Al menos 12 caracteres; máximo 72 bytes UTF-8."
-          />
-        )}
-        <MensajeEstado error={error} />
-        <p className="xn-ayuda">
-          Al editar, se cerrarán las sesiones de esta persona para aplicar los
-          cambios de forma segura.
-        </p>
-        <div className="xn-dialogo-acciones">
+    <>
+      <div className="xn-panel-titulo">
+        <div>
           <button
             type="button"
-            className="xn-boton xn-boton--secundario"
+            className="xn-volver"
             onClick={alCerrar}
             disabled={guardando}
           >
-            Cancelar
+            <Volver size={20} />
+            {editando ? 'Editar' : 'Agregar persona'}
           </button>
-          <button
-            className="xn-boton"
-            disabled={guardando || roles.estado !== 'listo'}
-          >
-            {guardando ? 'Guardando…' : 'Guardar persona'}
-          </button>
+          <nav className="xn-migas" aria-label="Ubicación">
+            <span>Personas</span>
+            <span>{editando ? usuario.nombres_completos : 'Crear'}</span>
+          </nav>
         </div>
+      </div>
+      <form noValidate onSubmit={enviar} className="xn-perfil-distribucion">
+        <section className="xn-trabajo-tarjeta xn-perfil-lateral">
+          {editando && (
+            <span
+              className={`xn-estado ${formulario.estado === 'Activo' ? 'es-exito' : 'es-neutro'}`}
+            >
+              {formulario.estado}
+            </span>
+          )}
+          <FotoPerfil
+            fotoUrl={usuario?.foto_url}
+            nombre={formulario.nombres_completos}
+            alElegir={cambiarFoto}
+            deshabilitado={guardando}
+          />
+          {editando ? (
+            <>
+              <Interruptor
+                etiqueta="Cuenta activa"
+                descripcion="Si la desactivas, la persona no podrá iniciar sesión ni ingresar a la sede."
+                activo={formulario.estado === 'Activo'}
+                deshabilitado={guardando}
+                alCambiar={(activa) =>
+                  cambiar('estado', activa ? 'Activo' : 'Inactivo')
+                }
+              />
+              {usuario.estado === 'Activo' && alDesactivar && (
+                <button
+                  type="button"
+                  className="xn-boton xn-boton--peligro-suave"
+                  disabled={guardando}
+                  onClick={alDesactivar}
+                >
+                  Desactivar cuenta
+                </button>
+              )}
+            </>
+          ) : (
+            <p className="xn-ayuda">La cuenta se crea activa.</p>
+          )}
+        </section>
+        <section className="xn-trabajo-tarjeta">
+          <div className="xn-formulario-cuadricula">
+            {campo('nombres_completos', 'Nombre completo', 'text', {
+              autoComplete: 'off',
+            })}
+            {campo('correo', 'Correo electrónico', 'email')}
+            <div className="xn-campo">
+              <label htmlFor="user-document-type">Tipo de documento</label>
+              <select
+                id="user-document-type"
+                value={formulario.tipo_documento}
+                disabled={guardando}
+                onChange={(evento) =>
+                  cambiar('tipo_documento', evento.target.value)
+                }
+              >
+                {['CC', 'TI', 'CE', 'PA', 'PEP', 'PPT'].map((tipo) => (
+                  <option key={tipo}>{tipo}</option>
+                ))}
+              </select>
+            </div>
+            {campo('numero_documento', 'Número de documento', 'text', {
+              inputMode: 'numeric',
+            })}
+            {campo('telefono', 'Teléfono', 'tel')}
+            {campo('fecha_nacimiento', 'Fecha de nacimiento', 'date')}
+            <div className="xn-campo">
+              <label htmlFor="user-id_rol">Rol</label>
+              <select
+                id="user-id_rol"
+                value={formulario.id_rol}
+                disabled={guardando}
+                onChange={(evento) => cambiar('id_rol', evento.target.value)}
+              >
+                <option value="">Seleccionar rol</option>
+                {roles.datos?.map((rol) => (
+                  <option key={rol.id_rol} value={rol.id_rol}>
+                    {rol.nombre_rol}
+                  </option>
+                ))}
+              </select>
+              {roles.estado === 'error' && (
+                <button
+                  type="button"
+                  className="xn-enlace-boton xn-texto-enlace"
+                  onClick={roles.actualizar}
+                >
+                  Reintentar carga de roles
+                </button>
+              )}
+            </div>
+            {editando && esAprendiz ? (
+              <div className="xn-campo">
+                <label htmlFor="user-situacion">Situación formativa</label>
+                <select
+                  id="user-situacion"
+                  value={formulario.situacion_formativa || ''}
+                  disabled={guardando}
+                  onChange={(evento) =>
+                    cambiar('situacion_formativa', evento.target.value)
+                  }
+                >
+                  <option value="" disabled>
+                    Seleccionar
+                  </option>
+                  <option>En inducción</option>
+                  <option>En formación</option>
+                  <option>Desertado</option>
+                  <option>Retirado</option>
+                </select>
+                {['Desertado', 'Retirado'].includes(
+                  formulario.situacion_formativa
+                ) && (
+                  <p className="xn-ayuda">
+                    Sale de la lista de su ficha y no podrá ingresar a la sede.
+                    Su historial se conserva y puedes revertirlo.
+                  </p>
+                )}
+              </div>
+            ) : (
+              !editando && (
+                <CampoContrasena
+                  identificador="user-contrasena"
+                  etiqueta="Contraseña inicial"
+                  valor={formulario.contrasena}
+                  alCambiar={(evento) =>
+                    cambiar('contrasena', evento.target.value)
+                  }
+                  ayuda="Si la dejas vacía, será el número de documento."
+                />
+              )
+            )}
+          </div>
+          <MensajeEstado error={error} />
+          {editando && (
+            <p className="xn-ayuda">
+              Al guardar, se cerrarán las sesiones de esta persona para aplicar
+              los cambios de forma segura.
+            </p>
+          )}
+          <div className="xn-perfil-acciones">
+            <button
+              type="button"
+              className="xn-boton xn-boton--secundario"
+              onClick={alCerrar}
+              disabled={guardando}
+            >
+              Cancelar
+            </button>
+            <button
+              className="xn-boton"
+              disabled={guardando || roles.estado !== 'listo'}
+            >
+              {guardando
+                ? 'Guardando…'
+                : editando
+                  ? 'Guardar cambios'
+                  : 'Crear persona'}
+            </button>
+          </div>
+        </section>
       </form>
-    </Dialogo>
+    </>
   );
 }
 function GestionPersonas() {
@@ -331,6 +406,35 @@ function GestionPersonas() {
       .toLowerCase()
       .includes(busqueda.toLowerCase())
   );
+  if (editor)
+    return (
+      <>
+        <EditorPersona
+          usuario={editor}
+          alCerrar={() => cambiarEditor(null)}
+          alDesactivar={
+            editor.id_usuarios &&
+            editor.id_usuarios !== usuarioActual.id_usuarios
+              ? () => {
+                  cambiarRetroalimentacion({});
+                  cambiarObjetivo(editor);
+                  cambiarEditor(null);
+                }
+              : null
+          }
+          alGuardar={() => {
+            /* esPropio: valor de trabajo utilizado en esta operación. */
+            const esPropio = editor.id_usuarios === usuarioActual.id_usuarios;
+            cambiarEditor(null);
+            cambiarRetroalimentacion({
+              mensaje: 'Datos guardados correctamente.',
+            });
+            recurso.actualizar();
+            if (esPropio) caducarSesion();
+          }}
+        />
+      </>
+    );
   return (
     <>
       <div className="xn-panel-titulo">
@@ -460,22 +564,6 @@ function GestionPersonas() {
           />
         </EstadoConsulta>
       </section>
-      {editor && (
-        <EditorPersona
-          usuario={editor}
-          alCerrar={() => cambiarEditor(null)}
-          alGuardar={() => {
-            /* esPropio: valor de trabajo utilizado en esta operación. */
-            const esPropio = editor.id_usuarios === usuarioActual.id_usuarios;
-            cambiarEditor(null);
-            cambiarRetroalimentacion({
-              mensaje: 'Datos guardados correctamente.',
-            });
-            recurso.actualizar();
-            if (esPropio) caducarSesion();
-          }}
-        />
-      )}
       {objetivo && (
         <Dialogo
           titulo="Desactivar cuenta"

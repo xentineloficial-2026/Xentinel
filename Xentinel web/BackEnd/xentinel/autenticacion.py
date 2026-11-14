@@ -55,7 +55,7 @@ def validar_bytes_clave(clave):
 
 Clave = Annotated[
     str,
-    StringConstraints(min_length=12, max_length=72),
+    StringConstraints(min_length=6, max_length=72),
     AfterValidator(validar_bytes_clave),
 ]
 

@@ -136,7 +136,7 @@ function CapituloFunciones() {
           </p>
           <div className="xn-bento-estados" aria-hidden="true">
             <span className="si">Presente · 06:58</span>
-            <span className="tarde">Tardanza · 07:12</span>
+            <span className="tarde">Retrasado · 07:12</span>
             <span>Sin registro</span>
           </div>
         </article>
@@ -159,7 +159,7 @@ function CapituloFunciones() {
         </article>
         <article className="xn-bento-celda">
           <Reporte size={26} />
-          <h3>Reportes en PDF y Excel.</h3>
+          <h3>Reportes en CSV y Excel.</h3>
           <p>Accesos y horarios listos para compartir.</p>
         </article>
         <article className="xn-bento-celda xn-bento-celda--tema">
