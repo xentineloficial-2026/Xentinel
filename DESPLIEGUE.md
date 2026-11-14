@@ -21,7 +21,7 @@ La base ya está creada. El backend no usa el usuario `postgres`: se conecta con
 - La conexión usa el **Session pooler** (IPv4, puerto 5432), porque Render no llega a la conexión directa de Supabase, que solo admite IPv6:
 
 ```text
-postgresql://xentinel_api.btecqrdsbbrejtltlzto:CLAVE@aws-1-us-east-1.pooler.supabase.com:5432/postgres?sslmode=require
+postgresql://xentinel_api.btecqrdsbbrejtltlzto:CLAVE@aws-0-us-east-1.pooler.supabase.com:5432/postgres?sslmode=require
 ```
 
 - El pooler admite 15 conexiones en el plan gratis; `DB_POOL_MAX=8` deja margen para los despliegues.
