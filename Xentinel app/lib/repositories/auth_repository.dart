@@ -19,16 +19,26 @@ class AuthRepository {
       authenticated: false,
       body: {'documento': documentId.trim(), 'contrasena': password},
     );
+    return _session(data, 'La respuesta de inicio de sesión no es válida.');
+  }
+
+  /// Nuevo JWT antes de que venza el actual (`POST /auth/renovar`).
+  Future<({UserEntity user, String token, int expiresIn})> renew() async {
+    final data = await _client.request('auth/renovar', method: 'POST');
+    return _session(data, 'La renovación de la sesión no es válida.');
+  }
+
+  static ({UserEntity user, String token, int expiresIn}) _session(
+    Object? data,
+    String invalidMessage,
+  ) {
     if (data is! Map ||
         data['usuario'] is! Map ||
         data['access_token'] is! String ||
         (data['access_token'] as String).isEmpty ||
         data['expires_in'] is! int ||
         (data['expires_in'] as int) <= 0) {
-      throw const ApiException(
-        'INVALID_RESPONSE',
-        'La respuesta de inicio de sesión no es válida.',
-      );
+      throw ApiException('INVALID_RESPONSE', invalidMessage);
     }
     return (
       user: UserEntity.fromApi(
@@ -38,6 +48,9 @@ class AuthRepository {
       expiresIn: data['expires_in'] as int,
     );
   }
+
+  /// Clave del carnet QR firmado del titular (`GET /auth/credencial-qr`).
+  Future<Object?> qrCredential() => _client.request('auth/credencial-qr');
 
   Future<void> forgotPassword(String email) async {
     await _client.request(

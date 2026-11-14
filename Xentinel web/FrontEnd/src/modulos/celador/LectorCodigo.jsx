@@ -6,7 +6,7 @@ import {
   useState as useEstado,
 } from 'react';
 import { Camera as Camara, ScanLine as Escaneo } from 'lucide-react';
-import { interpretarContenidoQr } from '../../compartido/utilidades/codigoQr.js';
+import { leerCodigoAcceso } from '../../compartido/utilidades/codigoQr.js';
 export function LectorCodigo({ alLeer }) {
   /* identificador: valor de trabajo utilizado en esta operación. */
   const identificador = useIdentificador().replaceAll(':', '');
@@ -77,10 +77,10 @@ export function LectorCodigo({ alLeer }) {
           if (procesado) return;
           try {
             /* usuario: valor de trabajo utilizado en esta operación. */
-            const usuario = interpretarContenidoQr(texto);
+            const codigo = leerCodigoAcceso(texto);
             procesado = true;
             detener();
-            alLeer(usuario);
+            alLeer(codigo);
           } catch (motivo) {
             cambiarError(motivo.message);
           }

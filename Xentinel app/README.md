@@ -10,13 +10,12 @@ Herramientas usadas: Flutter 3.47.7, Dart 3.13.5, Java 21 y SDK Android 36. Comp
 flutter pub get
 flutter analyze
 flutter test
-flutter run --dart-define-from-file=config/development.example.json
-flutter build apk --debug --dart-define-from-file=config/development.example.json
+flutter run
 ```
 
-`development.example.json` conecta el **emulador Android** con `http://10.0.2.2:8000/api/v1`. Inicia el Backend por separado. Para un teléfono real, copia el archivo a `config/development.local.json` y usa la IP LAN de la computadora; ambos deben estar en la misma red. HTTP solo se permite explícitamente en debug. No incluyas credenciales en la configuración.
+**Producción (cualquier red, sin puertos):** la app usa la API desplegada en Render, `https://xentinel-api.onrender.com/api/v1` (`lib/core/api_config.dart` y `config/production.json`), con la base de datos en Supabase. Funciona igual con datos móviles, con otra Wi‑Fi o con la red de la sede: no hay que escribir IP ni puertos en el teléfono, ni que los teléfonos compartan red. La APK release se compila con `scripts/build-release.sh` (Linux/macOS) o `scripts/publish-android.ps1` (Windows): una sola APK arm64 ofuscada.
 
-Las herramientas y dependencias locales se retiran después de exportar el APK. Instala los SDK fuera del código fuente y ejecuta `flutter pub get` para reconstruir. `setup.bat` y `setup.sh` solo restauran dependencias; no sobrescriben Android/iOS. El APK de pruebas usa `config/usb.example.json`; consulta `docs/INSTALAR_APK.md` para conectarlo al Backend por USB.
+**Otro servidor (solo desarrollo):** compila con `--dart-define=API_BASE_URL=<url>/api/v1` y, si es HTTP, `--dart-define=ALLOW_INSECURE_HTTP=true`; en esas compilaciones aparece el diálogo «Servidor».
 
 ## Arquitectura
 
@@ -28,7 +27,8 @@ lib/
   providers/     Estado reactivo (Riverpod), carnet y monitor de alertas
   repositories/  Contratos de autenticación, accesos y alertas
   screens/       Login, recuperación, inicio, carnet, cámara y alertas
-  services/      HTTP, SSE, permisos/cámara, biometría y sonido
+  services/      HTTP, WebSocket/SSE, red, cola sin conexión, credencial segura,
+                 renovación de sesión, cámara, brillo, biometría y sonido
 assets/          Logo y sonidos originales
 config/          Ejemplos sin secretos
 test/            Pruebas de lógica, API, cámara y navegación
@@ -39,22 +39,37 @@ docs/            Verificación y límites pendientes
 
 En Flutter, `providers/` cumple la función del estado y los hooks. Las rutas protegidas son `/home`, `/carnet`, `/alerts` y `/scanner`. El escáner está reservado a Administrador/Celador, además de la autorización del servidor. `/login` y `/forgot-password` son públicas. Las rutas desconocidas permiten volver al inicio. Las transiciones respetan la preferencia de reducir animaciones; las emergencias aparecen inmediatamente.
 
-## Backend localizado y contrato
+## Red, tiempo real y modo sin conexión
 
-Se verificó el código en `C:/Users/kevin/Music/Xentinel con alarma/Xentinel version Claudia/Xentinel version Claudia/Xentinel/BackEnd`. Configura el despliegue mediante `API_BASE_URL`; no se ha supuesto una URL de producción.
+```text
+ Teléfono (datos móviles / cualquier Wi‑Fi)          Nube (HTTPS 443)
+ ┌──────────────────────────────┐   REST + WSS   ┌──────────────────────────┐
+ │ ApiClient (JWT renovable)    │ ─────────────▶ │ Caddy (TLS automático)   │
+ │ WebSocket /tiempo-real ◀─────┼──── eventos ── │  └ FastAPI + PostgreSQL  │
+ │   ↳ SSE /eventos (respaldo)  │                └──────────────────────────┘
+ │   ↳ consulta periódica       │
+ │ Cola de accesos sin conexión │ ── se envía sola al volver la red (idempotente)
+ │ Carnet firmado (Keystore)    │ ── se genera sin internet
+ └──────────────────────────────┘
+```
 
-| Método | Ruta bajo `/api/v1` | Uso |
-|---|---|---|
-| POST | `auth/login` | `{documento, contrasena}` → JWT, vencimiento y usuario |
-| POST | `auth/logout` | Revoca la sesión del servidor |
-| POST | `auth/olvide-contrasena` | `{correo}`; respuesta genérica sin revelar cuentas |
-| GET | `alertas/activas` | Lista de alertas activas con severidad y mensaje |
-| GET | `eventos` | SSE autenticado: `change`, `checkpoint`, `auth-expired` |
-| POST | `ingresos` | `{id_usuarios, tipo, metodo: 'QR', request_id}` |
+| Pieza | Comportamiento |
+| --- | --- |
+| Servidor | URL HTTPS compilada en la app. Ninguna IP local, puerto manual ni Wi‑Fi compartida. |
+| Tiempo real | WebSocket seguro (`wss://…/api/v1/tiempo-real`), autenticado en el primer mensaje (el JWT no va en la URL), ping cada 20 s y vigilancia de inactividad de 45 s. Si una red o proxy bloquea WebSocket, pasa a SSE con el mismo cursor; la consulta periódica queda como red de seguridad (60 s con canal en vivo, 3 s con espera progresiva sin él). |
+| Cambios de red | `connectivity_plus` detecta el paso de Wi‑Fi a datos o la recuperación de señal y reconecta al instante. Sin red no gasta batería reintentando. Reconexión con espera exponencial y variación aleatoria. |
+| Sesión | El JWT (15 min) se renueva al 75 % de su vigencia con `POST /auth/renovar`, hasta `SESSION_MAX_HOURS` (12 h) desde el ingreso. El canal abierto recibe el token nuevo sin reconectar. |
+| Escáner sin conexión | Sin servidor, el escaneo se guarda en una cola persistente (sobrevive a reinicios) con su `request_id` y la hora del servidor. Se envía al recuperar la red, al volver la app al frente y cada 30 s; el servidor valida la firma con la hora del escaneo y no duplica reintentos. Lo que el servidor rechace queda en «Requieren revisión». |
+| Carnet sin conexión | La clave del carnet firmado se guarda en el Keystore/Keychain. El carnet se abre desde el login, sin sesión ni internet, tras huella/rostro/PIN. |
+| Reloj | La hora del servidor llega por el canal (`servidor_ms`) y por la cabecera `Date`, y se guarda para usarla sin conexión. |
 
-El cliente usa `package:http`, equivalente nativo de Fetch para Flutter, con cancelación, timeout y JWT en memoria. Lee `data` y `error` en las respuestas. Un 401 vence la sesión sin permitir que una respuesta antigua cierre una sesión nueva. Las escrituras no se reintentan automáticamente; un reintento del mismo escaneo conserva su UUID de idempotencia. Una respuesta perdida se muestra en amarillo como **acceso sin confirmar**.
+Contrato bajo `/api/v1`: `auth/login`, `auth/renovar`, `auth/logout`, `auth/olvide-contrasena`, `auth/credencial-qr`, `alertas/activas`, `tiempo-real` (WebSocket), `eventos` (SSE) e `ingresos` (`{codigo_qr|id_usuarios, tipo, metodo:'QR', request_id, escaneado_en?}`). Detalle en `Xentinel web/BackEnd/docs/API.md`. Un servidor antiguo sin estas rutas sigue funcionando: la app usa SSE, el carnet heredado y la sesión vence a los 15 minutos.
 
-Las alertas llegan por SSE con reconexión y cursor; hay consulta de respaldo cada 3 segundos mientras la app está abierta, con espera progresiva ante errores. Las últimas alertas se conservan si se pierde conexión y se marcan como desactualizadas. No hay FCM/APNs en el Backend encontrado: **no se prometen notificaciones con la app cerrada**. Recuperar contraseña requiere SMTP y la página de restablecimiento del servidor.
+## Carnet QR de celular a celular
+
+El carnet usa el formato firmado `XN2:<id>:<paso>:<firma>` (HMAC‑SHA256 emitido por el servidor, rota cada 15 s en el borde exacto según la hora del servidor). Solo contiene caracteres del modo alfanumérico de QR, así cabe en una versión 3 (29×29 módulos) con corrección de errores Q (25 %). La pantalla del carnet sube el brillo de la app al máximo mientras está visible y dibuja el código hasta 320 dp, negro puro sobre blanco con zona de silencio amplia.
+
+El escáner analiza a 1280×720, solo QR, con zoom automático de ML Kit (Android), enfoque al tocar y zoom por pellizco o deslizador: permite alejar el teléfono más allá de la distancia mínima de enfoque, causa principal de las lecturas fallidas de pantalla a pantalla. Entre varios códigos en el cuadro elige el de Xentinel, y tras un resultado ignora durante 6 s a la misma persona aunque su código rote. La validez la decide el servidor con su propia hora, por lo que la diferencia de reloj entre dos teléfonos ya no rechaza carnets válidos. El lector de la web (PC) también reconoce este carnet.
 
 ## Cámara
 
@@ -64,7 +79,7 @@ Las pruebas automatizadas usan cámara simulada. El enfoque, lectura y permisos 
 
 ## Distribución y Dashboard
 
-El identificador Android es `co.edu.sena.xentinel`. No se publican APK de debug como versiones oficiales. Configura `android/key.properties` con la **clave de firma existente** para actualizar instalaciones y crea `config/production.local.json` con una URL HTTPS real. Nunca confirmes esos archivos en control de versiones.
+El identificador Android es `co.edu.sena.xentinel`. No se publican APK de debug como versiones oficiales. Configura `android/key.properties` con la **clave de firma existente** para actualizar instalaciones; nunca lo confirmes en control de versiones. La URL de producción está en `config/production.json`.
 
 ```properties
 # android/key.properties — ruta relativa a android/ o absoluta
@@ -75,16 +90,18 @@ keyPassword=TU_CLAVE
 ```
 
 ```powershell
-./scripts/publish-android.ps1 -ConfigFile config/production.local.json -WebPublic 'C:/ruta/FrontEnd/public'
+./scripts/publish-android.ps1 -WebPublic 'C:/ruta/FrontEnd/public'
 ```
 
 El script compila release, comprueba paquete y firma, rechaza binarios depurables y genera un manifiesto con versión, tamaño y SHA-256 del APK real. `Descarga.html` usa ese manifiesto; si falta una versión válida, muestra disponibilidad pendiente sin enlazar un APK antiguo. Los botones existentes del Dashboard ya llevan a `/Descarga.html`.
 
 No hay IPA/App Store configurado. Release requiere la firma del propietario; debug sirve para desarrollo y no es una actualización de producción.
 
-## Límites del contrato heredado
+## Seguridad y límites
 
-El QR `XENTINEL:<id>:<timestamp>` se renueva cada 15 s y la app comprueba una ventana de 45 s. **No está firmado criptográficamente**. El Backend valida operador, estado, alternancia e idempotencia; el timestamp validado solo en el móvil no demuestra autenticidad del carnet. Antes de utilizarlo como credencial de seguridad, debe añadirse emisión y verificación de QR firmados en el servidor. No se sustituyó ese contrato sin una migración coordinada.
+El carnet firmado lo verifica el servidor: un QR fabricado o alterado se rechaza (`INVALID_QR`) y cerrar sesión, cambiar la contraseña o desactivar la cuenta revoca los carnets emitidos, incluidos los guardados sin conexión. Los formatos heredados (`XENTINEL:<id>:<timestamp>` y la identificación JSON de la web) siguen aceptándose para la transición; con `QR_REQUIRE_SIGNED=true` en el servidor el método QR exige el carnet firmado.
 
-Las migraciones Supabase y plantillas Android antiguas se conservan en un respaldo privado fuera del proyecto ejecutable al realizar la limpieza; no deben aplicarse al Backend REST actual.
+Sin conexión, el escáner no puede consultar el estado de la cuenta ni la firma: muestra «Registrado sin conexión» en azul (no en verde) y pide verificar el documento. Al sincronizar, el servidor decide; si rechaza un movimiento o lo registra como denegado, el celador lo ve en «Requieren revisión». La cola expira a las 72 h. Las alertas en tiempo real requieren la app abierta: no hay FCM/APNs en el Backend, por lo que **no se prometen notificaciones con la app cerrada**.
+
+Android release: sin tráfico HTTP en claro, sin copias de seguridad ni transferencia de datos de la app, código Dart ofuscado (`--obfuscate --split-debug-info=build/symbols`). Las migraciones Supabase y plantillas Android antiguas se conservan en un respaldo privado fuera del proyecto; no deben aplicarse al Backend REST actual.
 

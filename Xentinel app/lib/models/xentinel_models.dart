@@ -208,3 +208,23 @@ final class Unconfirmed extends AccessScanResult {
   @override
   AccessStatus get status => AccessStatus.pendiente;
 }
+
+/// Sin conexión con el servidor: el movimiento quedó guardado en el teléfono y se
+/// enviará automáticamente al recuperar la red (azul institucional, no verde: el
+/// servidor todavía no lo confirmó).
+final class QueuedOffline extends AccessScanResult {
+  const QueuedOffline({required this.userId, this.repeated = false});
+
+  /// Identificador del carnet leído.
+  final int userId;
+
+  /// El mismo paso ya estaba en la cola: no se guardó dos veces.
+  final bool repeated;
+
+  @override
+  Color get color => const Color(0xFF18458D);
+  @override
+  String get message => 'Registrado sin conexión';
+  @override
+  AccessStatus get status => AccessStatus.pendiente;
+}

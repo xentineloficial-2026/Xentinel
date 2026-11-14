@@ -1,86 +1,86 @@
 # Xentinel en cualquier red
 
-Hoy la app busca el backend en tu PC, por eso solo sirve en tu Wi-Fi y con el puerto abierto. Para que funcione con solo instalarla, el backend y la base de datos tienen que vivir en internet, en una dirección `https://` fija.
+La app, la web y el backend viven en internet, en direcciones `https://` fijas. La app funciona con solo instalarla: con datos móviles o con cualquier Wi-Fi, sin escribir IP ni abrir puertos.
 
-Esta guía deja el **piloto gratis**:
+| Parte | Servicio | Dirección | Límite del plan gratis |
+|---|---|---|---|
+| Backend `xentinel-api` | Render | <https://xentinel-api.onrender.com> | Se duerme tras 15 minutos sin uso y tarda cerca de un minuto en despertar |
+| Web `xentinel-web` | Render, sitio estático | <https://xentinel-web.onrender.com> | Las actualizaciones se publican al hacer push |
+| Base de datos | Supabase (PostgreSQL 17) | Proyecto `btecqrdsbbrejtltlzto`, us-east-1 | 500 MB; el proyecto se pausa tras una semana sin actividad |
+| Correo (opcional) | Brevo | `smtp-relay.brevo.com:2525` | 300 correos al día |
 
-| Parte | Servicio | Límite del plan gratis |
-|---|---|---|
-| Backend `xentinel-api` | Render | Se duerme tras 15 minutos sin uso y tarda cerca de un minuto en despertar |
-| Web `xentinel-web` | Render, sitio estático | Las actualizaciones se publican al hacer push |
-| Base de datos | Neon | 1 GB; se suspende sin uso y tiene un límite mensual de cómputo |
-| Correo | Brevo | 300 correos al día |
+**Este plan sirve para probar y mostrar el proyecto. Antes de atender emergencias reales, pasa el backend a un plan de pago que no se duerma.** No uses servicios que hagan pings para mantenerlo despierto: agotarían las horas gratis de Render.
 
-**Este plan sirve para probar y mostrar el proyecto. Antes de atender emergencias reales, pasa el backend a un plan de pago que no se duerma.** No uses servicios que hagan pings para mantenerlo despierto: agotarían las horas gratis de Render y el cómputo de Neon.
+El repositorio está en <https://github.com/xentineloficial-2026/Xentinel>. Cada push a `main` vuelve a desplegar la API y la web.
 
-El repositorio ya está en <https://github.com/xentineloficial-2026/Xentinel>.
+## 1. Base de datos en Supabase
 
-## 1. Crear la base en Neon
+La base ya está creada. El backend no usa el usuario `postgres`: se conecta con su propio usuario, `xentinel_api`, dueño de las tablas de Xentinel, sin permisos de administrador. Al arrancar, el backend aplica solo las migraciones pendientes (`python -m xentinel migrar`).
 
-1. Crea una cuenta en <https://neon.com> y un proyecto llamado `xentinel`.
-2. Elige la región **AWS US East (N. Virginia)**, cerca del backend, y Postgres **18** si está disponible.
-3. En **Connect**, **desactiva "Connection pooling"** y copia el enlace. No debe contener `-pooler`, porque el backend envía opciones de conexión que el modo pooled no admite.
+- Todas las tablas tienen RLS activado y sin acceso para `anon` ni `authenticated`: la API de datos de Supabase no expone nada. El único cliente es el backend.
+- La conexión usa el **Session pooler** (IPv4, puerto 5432), porque Render no llega a la conexión directa de Supabase, que solo admite IPv6:
 
-Guarda ese enlace como `DATABASE_URL`. Es un secreto.
+```text
+postgresql://xentinel_api.btecqrdsbbrejtltlzto:CLAVE@aws-1-us-east-1.pooler.supabase.com:5432/postgres?sslmode=require
+```
+
+- El pooler admite 15 conexiones en el plan gratis; `DB_POOL_MAX=8` deja margen para los despliegues.
+
+Para cambiar la clave de `xentinel_api`, ejecuta en el **SQL Editor** de Supabase `ALTER ROLE xentinel_api PASSWORD 'clave-nueva';` y actualiza `DATABASE_URL` en Render.
 
 ## 2. Pasar tus datos actuales (opcional)
 
-Este paso lleva datos personales reales a un servidor externo. Si tu institución tiene reglas al respecto, revísalas antes. Si lo omites, el backend crea las tablas vacías al arrancar.
+Este paso lleva datos personales reales a un servidor externo. Si tu institución tiene reglas al respecto, revísalas antes. Si lo omites, la base queda con las tablas vacías.
 
 Desde la carpeta del proyecto:
 
 ```bash
-pg_dump --no-owner --no-acl --format=custom --file=xentinel-privado/para-render.dump "postgresql://USUARIO:CLAVE@127.0.0.1:5432/xentinel"
+pg_dump --no-owner --no-acl --format=custom --file=xentinel-privado/para-supabase.dump "postgresql://USUARIO:CLAVE@127.0.0.1:5432/xentinel"
 ```
 
 ```bash
-pg_restore --no-owner --no-acl --clean --if-exists --dbname="DATABASE_URL_DE_NEON" xentinel-privado/para-render.dump
+pg_restore --no-owner --no-acl --clean --if-exists --dbname="DATABASE_URL_DE_RENDER" xentinel-privado/para-supabase.dump
 ```
 
-`pg_restore` puede mostrar avisos sobre extensiones o el esquema `public`. Si la tabla `usuarios` tiene tus datos, el resultado es correcto.
+Usa el mismo `DATABASE_URL` del backend, para que las tablas sigan siendo de `xentinel_api`. `pg_restore` puede mostrar avisos sobre extensiones o el esquema `public`. Después, en Render, abre `xentinel-api` y elige **Manual Deploy > Restart service**: al arrancar se aplican las migraciones que falten.
 
-## 3. Preparar el correo en Brevo
+## 3. Correo con Brevo (opcional)
 
-El backend no arranca en producción sin correo, y el plan gratis de Render bloquea los puertos habituales. Por eso se usa Brevo por el puerto 2525, ya configurado en `render.yaml`.
+Sin correo, la API funciona igual y la recuperación de contraseña responde que no está disponible. Para activarla:
 
 1. Crea una cuenta en <https://www.brevo.com>.
 2. En **Settings > Senders & IPs > Senders**, agrega y verifica el correo que enviará los mensajes.
 3. En **SMTP & API > SMTP**, genera una **clave SMTP** y anota el usuario de inicio de sesión.
+4. En Render, en `xentinel-api` > **Environment**, escribe `SMTP_HOST=smtp-relay.brevo.com`, `SMTP_USER`, `SMTP_PASS` y `SMTP_FROM` (`Xentinel <tu-correo-verificado>`). El puerto 2525 ya está en `render.yaml`.
 
-## 4. Crear los servicios en Render
+## 4. Servicios en Render
 
-1. En <https://dashboard.render.com>, elige **New > Blueprint** y conecta GitHub con la cuenta `xentineloficial-2026`.
-2. Selecciona el repositorio `Xentinel` y confirma que ambos servicios aparezcan como gratis.
-3. Escribe estos valores:
+Los dos servicios se crean desde `render.yaml` (**New > Blueprint**, repositorio `Xentinel`, ambos gratis). Valores del panel:
 
 | Variable | Valor |
 |---|---|
-| `DATABASE_URL` | El enlace directo de Neon |
-| `JWT_SECRET` | Está en `xentinel-privado/render-secretos.txt` |
-| `MAIL_ENCRYPTION_KEY` | Está en `xentinel-privado/render-secretos.txt` |
+| `DATABASE_URL` | El enlace del Session pooler de la sección 1 |
+| `JWT_SECRET`, `MAIL_ENCRYPTION_KEY`, `QR_SECRET` | Secretos aleatorios propios de producción; no reutilices los de tu `.env` |
 | `WEB_ORIGINS` | `https://xentinel-web.onrender.com` |
 | `RESET_PASSWORD_URL` | `https://xentinel-web.onrender.com/restablecer-contrasena` |
-| `SMTP_USER` | El usuario SMTP de Brevo |
-| `SMTP_PASS` | La clave SMTP de Brevo |
-| `SMTP_FROM` | `Xentinel <tu-correo-verificado>` |
+| `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | Vacíos hasta configurar Brevo |
 | `VITE_API_URL` | `https://xentinel-api.onrender.com` (sin `/api/v1`) |
 
-Render puede cambiar esas direcciones si el nombre ya está ocupado. Si pasa, corrige `WEB_ORIGINS`, `RESET_PASSWORD_URL` y `VITE_API_URL` con las reales, y vuelve a desplegar la web.
+Comprueba que `https://xentinel-api.onrender.com/ready` responda `{"status":"ready"}`. La primera vez puede tardar cerca de un minuto.
 
-4. Comprueba que `https://xentinel-api.onrender.com/ready` responda `{"status":"ready"}`. La primera vez puede tardar cerca de un minuto.
-
-Si el despliegue falla, revisa primero en los registros el correo (usuario, clave y remitente verificado) y luego el enlace de Neon.
+Si el despliegue falla, revisa en los registros de `xentinel-api` primero el enlace de Supabase (usuario, clave y host del pooler) y luego el correo.
 
 ## 5. Compilar la APK definitiva (Android)
 
-1. Copia `Xentinel app/config/production.example.json` como `production.json` y pon tu API: `https://xentinel-api.onrender.com/api/v1`.
-2. Crea la firma, una sola vez. `keytool` viene con Android Studio. Guarda el archivo y las claves fuera del repositorio: sin ellos no podrás actualizar la app.
+`Xentinel app/config/production.json` ya apunta a `https://xentinel-api.onrender.com/api/v1`, y la app usa esa misma dirección por defecto.
+
+1. Crea la firma, una sola vez. `keytool` viene con Android Studio. Guarda el archivo y las claves fuera del repositorio: sin ellos no podrás actualizar la app.
 
 ```bash
 keytool -genkey -v -keystore xentinel.jks -alias xentinel -keyalg RSA -keysize 2048 -validity 10000
 ```
 
-3. Crea `Xentinel app/android/key.properties`. La ruta de `storeFile` es relativa a la carpeta `android`:
+2. Crea `Xentinel app/android/key.properties`. La ruta de `storeFile` es relativa a la carpeta `android`:
 
 ```properties
 storeFile=../../xentinel-privado/xentinel.jks
@@ -89,15 +89,21 @@ keyAlias=xentinel
 keyPassword=TU_CLAVE
 ```
 
-4. Compila y publica en la página de descarga, desde `Xentinel app`:
+3. Compila una sola APK arm64, optimizada y ofuscada, desde `Xentinel app`:
 
-```powershell
-.\scripts\publish-android.ps1 -ConfigFile config\production.json -WebPublic "..\Xentinel web\FrontEnd\public"
+```bash
+./scripts/build-release.sh
 ```
 
-5. Haz commit y push de `public/downloads` y `app-release.json` para que Render publique la APK.
+En Windows, el script además la publica en la página de descarga de la web:
 
-Con esta compilación desaparece "Configurar servidor" y se ignora cualquier IP vieja guardada en el teléfono.
+```powershell
+.\scripts\publish-android.ps1 -WebPublic "..\Xentinel web\FrontEnd\public"
+```
+
+4. Si la publicaste en la web, haz commit y push de `public/downloads` y `app-release.json` para que Render la sirva.
+
+Esta compilación no muestra "Configurar servidor" e ignora cualquier IP vieja guardada en el teléfono.
 
 ## 6. iPhone (iOS)
 
@@ -114,8 +120,8 @@ flutter build ipa --dart-define-from-file=config/production.json
 
 ## Al pasar a producción
 
-En el panel de Render, cambia `xentinel-api` a un plan de pago para que no se duerma. Render permite además enviar correo por los puertos normales en los planes de pago.
+En el panel de Render, cambia `xentinel-api` a un plan de pago para que no se duerma; los planes de pago también permiten el correo por los puertos normales. En Supabase, un plan de pago evita la pausa por inactividad y agrega respaldos diarios.
 
 ## Qué funciona sin internet
 
-Dos teléfonos no pueden validar un acceso entre sí sin un servidor común. Con el servidor en internet sirve cualquier Wi-Fi o datos móviles, pero sin ninguna conexión el registro no llega al servidor.
+Dos teléfonos no pueden validar un acceso entre sí sin un servidor común. Con el servidor en internet sirve cualquier Wi-Fi o datos móviles. Sin conexión, el escáner guarda cada lectura en el teléfono y la envía al servidor cuando vuelve la red, y el carnet se puede mostrar sin conexión tras iniciar sesión una vez.

@@ -10,7 +10,6 @@ xentinel-privado/
 key.properties
 Xentinel.sql
 Xentinel app/config/demo.local.json
-Xentinel app/config/production.json
 Xentinel web/BackEnd/static/
 
 # Instaladores y material de trabajo.

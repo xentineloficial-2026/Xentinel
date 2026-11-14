@@ -1,0 +1,4 @@
+{
+  "API_BASE_URL": "https://xentinel-api.onrender.com/api/v1",
+  "ALLOW_INSECURE_HTTP": false
+}

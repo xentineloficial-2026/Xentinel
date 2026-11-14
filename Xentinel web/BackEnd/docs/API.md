@@ -6,43 +6,46 @@ En React, guardar `respuesta.data.usuario` al iniciar sesión y utilizar `user.n
 
 Base: `/api/v1`. JSON UTF-8. `Authorization: Bearer <access_token>` en rutas protegidas. Paginación `?limit=25&offset=0`, máximo 100. Fechas ISO 8601, instantes con zona UTC; datos históricos sin zona del dump se interpretan como America/Bogota.
 
-| Método y ruta                                     | Permiso                             | Entrada / resultado                                                                                |
-| ------------------------------------------------- | ----------------------------------- | -------------------------------------------------------------------------------------------------- |
-| POST `/auth/registro`                             | Público                             | Nombre, tipo/documento, correo, contraseña; rol Aprendiz fijado por servidor                       |
-| POST `/auth/login`                                | Público                             | `{documento,contrasena}` → `{access_token,token_type,expires_in,usuario}`                          |
-| GET `/auth/me`                                    | Sesión                              | Perfil sin hash ni secretos                                                                        |
-| POST `/auth/logout`                               | Sesión                              | Revoca todas las sesiones del usuario; 204                                                         |
-| PUT `/auth/contrasena`                            | Sesión                              | `{actual,nueva}`; revoca sesiones y recuperación; 204                                              |
-| POST `/auth/olvide-contrasena`                    | Público, limitado                   | `{correo}`; 202 genérico                                                                           |
-| POST `/auth/validar-recuperacion`                 | Público, limitado                   | `{correo,token}`; `{valid:true}` sin consumir token                                                |
-| POST `/auth/restablecer-contrasena`               | Público, limitado                   | `{correo,token,contrasena}`; revalidación y consumo atómico                                        |
-| GET `/usuarios`                                   | Administrador                       | Filtros `id_rol` y `estado=Activo/Inactivo`. Con `estado` devuelve ambos conteos en `meta.totales` |
-| POST `/usuarios`                                  | Administrador                       | Datos de registro más `id_rol`                                                                     |
-| GET `/usuarios/:id`                               | Propietario / administrador         | Perfil                                                                                             |
-| PATCH `/usuarios/:id`                             | Propietario / administrador         | Campos parciales; sólo admin cambia documento, correo, rol o estado                                |
-| DELETE `/usuarios/:id`                            | Administrador                       | Desactivación lógica; conserva historial; 204                                                      |
-| GET `/usuarios/:id/fichas`                        | Propietario / administrador         | Asignaciones vigentes                                                                              |
-| GET `/ingresos`                                   | Sesión                              | Propios; solo administrador consulta todos o filtra `id_usuarios`                                  |
-| POST `/ingresos`                                  | Celador / administrador             | `{id_usuarios,tipo,metodo,request_id}`                                                             |
-| GET `/alertas`                                    | Sesión                              | Historial paginado; filtro `activa=true/false`                                                     |
-| GET `/alertas/activas`                            | Sesión                              | Todas las activas                                                                                  |
-| GET `/alertas/:id`                                | Sesión                              | Detalle                                                                                            |
-| POST `/alertas`                                   | Administrador                       | Tipo, mensaje, severidad, fuente y referencia opcional                                             |
-| PATCH `/alertas/:id/cerrar`                       | Administrador                       | Cierra sólo esa alerta; idempotente                                                                |
-| POST `/alertas/sos`                               | Sesión                              | `{id_alerta,latitud,longitud}`; propietario tomado del JWT                                         |
-| GET `/alertas/:id/sos`                            | Administrador                       | Ubicaciones paginadas                                                                              |
-| POST `/alertas/reportes`                          | Instructor asignado / administrador | `{id_alerta,id_ficha,observaciones?,estudiantes:[{id_usuarios,presente}]}`                         |
-| GET `/alertas/:id/reportes`                       | Instructor / administrador          | Reportes propios; administrador ve todos                                                           |
-| GET `/roles`, `/fichas`, `/jornadas`, `/horarios` | Sesión                              | Catálogos paginados                                                                                |
-| GET `/programas`                                  | Sesión                              | Catálogo paginado. Administrador puede filtrar `activo=true/false`; otros roles ven sólo activos   |
-| GET `/programas/:id`, `/programas/instructores`   | Administrador                       | Detalle anidado y lista de instructores activos                                                    |
-| POST `/programas`, PATCH `/programas/:id`         | Administrador                       | Guarda programa, fichas y horarios en una transacción. PATCH también admite `{activo}`             |
-| GET `/reportes/accesos`, `/reportes/horarios`     | Administrador                       | Lotes completos con `limit`, `despues`, `hasta`. Accesos requiere `fecha=AAAA-MM-DD` (Bogotá)      |
-| GET `/asistencias`                                | Sesión                              | Propias; administrador ve todas                                                                    |
-| GET `/asistencias/fichas`                         | Instructor/admin                    | Fichas visibles: asignadas al instructor; administrador ve todas                                   |
-| GET `/asistencias/lista`                          | Instructor/admin                    | Aprendices de sus fichas y estado del día (`id_ficha`, `fecha`): Presente, Retraso o Sin registro  |
-| PUT `/fichas/{id}/jornada`                        | Administrador                       | `{nombre,hora_inicio,hora_fin}`: define la jornada vigente; la asistencia anterior no cambia       |
-| GET `/eventos`                                    | Sesión                              | SSE; `Last-Event-ID` o `?after=cursor`                                                             |
+| Método y ruta                                     | Permiso                             | Entrada / resultado                                                                                         |
+| ------------------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| POST `/auth/registro`                             | Público                             | Nombre, tipo/documento, correo, contraseña; rol Aprendiz fijado por servidor                                |
+| POST `/auth/login`                                | Público                             | `{documento,contrasena}` → `{access_token,token_type,expires_in,usuario}`                                   |
+| GET `/auth/me`                                    | Sesión                              | Perfil sin hash ni secretos                                                                                 |
+| POST `/auth/logout`                               | Sesión                              | Revoca todas las sesiones del usuario; 204                                                                  |
+| POST `/auth/renovar`                              | Sesión                              | Nuevo JWT con el mismo formato de login; máximo `SESSION_MAX_HOURS` desde el ingreso; 401 `SESSION_MAX_AGE` |
+| GET `/auth/credencial-qr`                         | Sesión                              | Clave del carnet QR rotativo firmado (XN2) del titular, para generarlo también sin conexión                 |
+| PUT `/auth/contrasena`                            | Sesión                              | `{actual,nueva}`; revoca sesiones y recuperación; 204                                                       |
+| POST `/auth/olvide-contrasena`                    | Público, limitado                   | `{correo}`; 202 genérico                                                                                    |
+| POST `/auth/validar-recuperacion`                 | Público, limitado                   | `{correo,token}`; `{valid:true}` sin consumir token                                                         |
+| POST `/auth/restablecer-contrasena`               | Público, limitado                   | `{correo,token,contrasena}`; revalidación y consumo atómico                                                 |
+| GET `/usuarios`                                   | Administrador                       | Filtros `id_rol` y `estado=Activo/Inactivo`. Con `estado` devuelve ambos conteos en `meta.totales`          |
+| POST `/usuarios`                                  | Administrador                       | Datos de registro más `id_rol`                                                                              |
+| GET `/usuarios/:id`                               | Propietario / administrador         | Perfil                                                                                                      |
+| PATCH `/usuarios/:id`                             | Propietario / administrador         | Campos parciales; sólo admin cambia documento, correo, rol o estado                                         |
+| DELETE `/usuarios/:id`                            | Administrador                       | Desactivación lógica; conserva historial; 204                                                               |
+| GET `/usuarios/:id/fichas`                        | Propietario / administrador         | Asignaciones vigentes                                                                                       |
+| GET `/ingresos`                                   | Sesión                              | Propios; solo administrador consulta todos o filtra `id_usuarios`                                           |
+| POST `/ingresos`                                  | Celador / administrador             | `{id_usuarios\|codigo_qr,tipo,metodo,request_id,escaneado_en?}`; ver «Carnet QR firmado»                    |
+| GET `/alertas`                                    | Sesión                              | Historial paginado; filtro `activa=true/false`                                                              |
+| GET `/alertas/activas`                            | Sesión                              | Todas las activas                                                                                           |
+| GET `/alertas/:id`                                | Sesión                              | Detalle                                                                                                     |
+| POST `/alertas`                                   | Administrador                       | Tipo, mensaje, severidad, fuente y referencia opcional                                                      |
+| PATCH `/alertas/:id/cerrar`                       | Administrador                       | Cierra sólo esa alerta; idempotente                                                                         |
+| POST `/alertas/sos`                               | Sesión                              | `{id_alerta,latitud,longitud}`; propietario tomado del JWT                                                  |
+| GET `/alertas/:id/sos`                            | Administrador                       | Ubicaciones paginadas                                                                                       |
+| POST `/alertas/reportes`                          | Instructor asignado / administrador | `{id_alerta,id_ficha,observaciones?,estudiantes:[{id_usuarios,presente}]}`                                  |
+| GET `/alertas/:id/reportes`                       | Instructor / administrador          | Reportes propios; administrador ve todos                                                                    |
+| GET `/roles`, `/fichas`, `/jornadas`, `/horarios` | Sesión                              | Catálogos paginados                                                                                         |
+| GET `/programas`                                  | Sesión                              | Catálogo paginado. Administrador puede filtrar `activo=true/false`; otros roles ven sólo activos            |
+| GET `/programas/:id`, `/programas/instructores`   | Administrador                       | Detalle anidado y lista de instructores activos                                                             |
+| POST `/programas`, PATCH `/programas/:id`         | Administrador                       | Guarda programa, fichas y horarios en una transacción. PATCH también admite `{activo}`                      |
+| GET `/reportes/accesos`, `/reportes/horarios`     | Administrador                       | Lotes completos con `limit`, `despues`, `hasta`. Accesos requiere `fecha=AAAA-MM-DD` (Bogotá)               |
+| GET `/asistencias`                                | Sesión                              | Propias; administrador ve todas                                                                             |
+| GET `/asistencias/fichas`                         | Instructor/admin                    | Fichas visibles: asignadas al instructor; administrador ve todas                                            |
+| GET `/asistencias/lista`                          | Instructor/admin                    | Aprendices de sus fichas y estado del día (`id_ficha`, `fecha`): Presente, Retraso o Sin registro           |
+| PUT `/fichas/{id}/jornada`                        | Administrador                       | `{nombre,hora_inicio,hora_fin}`: define la jornada vigente; la asistencia anterior no cambia                |
+| GET `/eventos`                                    | Sesión                              | SSE; `Last-Event-ID` o `?after=cursor`                                                                      |
+| WS `/tiempo-real`                                 | Sesión (mensaje `auth`)             | WebSocket (WSS en producción) con el mismo cursor y filtros que SSE                                         |
 
 El editor de programas admite horarios con día, hora de inicio, hora de fin, entorno e instructor, agrupados dentro de sus fichas. Desactivar conserva las relaciones históricas. Las exportaciones devuelven `meta.hasta` como límite fijo, y `meta.siguiente` es nulo al finalizar. Swagger está disponible en `/docs` y el contrato generado en `/openapi.json`.
 
@@ -104,6 +107,28 @@ data: {"cursor":"125"}
 ```
 
 Guardar el cursor como texto para no perder precisión de bigint. Aplicar el cambio antes de guardar el cursor. Al reconectar, reenviarlo mediante `Last-Event-ID` o `after`. `auth-expired` exige nuevo login; `retry` o fin de conexión exige reconectar. Los eventos pueden repetirse tras una desconexión: actualizar por ID de forma idempotente. El cursor empieza en 0 cuando no se proporciona; se entrega el historial visible en lotes de 200. Máximo cinco streams por usuario y 500 por proceso; no registrar tokens en URLs.
+
+### Canal WebSocket `/api/v1/tiempo-real`
+
+Canal preferido para la app móvil: atraviesa redes móviles, Wi‑Fi distintas y proxies HTTPS sin abrir puertos adicionales (usa el mismo 443 que la API). Cada mensaje es un objeto JSON de texto:
+
+| Sentido            | Mensaje                                                           | Uso                                                              |
+| ------------------ | ----------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Cliente → servidor | `{"tipo":"auth","token":"<JWT>","cursor":"125"}`                  | Obligatorio en los primeros 10 s. El token nunca viaja en la URL |
+| Servidor → cliente | `{"tipo":"listo","cursor":"125","servidor_ms":…}`                 | Canal autenticado                                                |
+| Servidor → cliente | `{"tipo":"change","id":"126","data":{…}}`                         | Mismo contenido que el evento SSE `change`                       |
+| Servidor → cliente | `{"tipo":"checkpoint","cursor":"126","servidor_ms":…}`            | Cada 15 s o tras un lote; guardar el cursor                      |
+| Cliente → servidor | `{"tipo":"ping"}` → `{"tipo":"pong","servidor_ms":…}`             | Latencia y reloj del servidor                                    |
+| Cliente → servidor | `{"tipo":"auth","token":"<JWT renovado>"}` → `{"tipo":"auth-ok"}` | Renueva la sesión sin reconectar                                 |
+| Servidor → cliente | `{"tipo":"auth-expired"}`                                         | Sesión vencida o revocada                                        |
+
+Códigos de cierre: `4401` sesión inválida, `4403` origen no autorizado, `4409` cursor inválido (sincronizar desde 0), `4429` límite de conexiones, `4503` base de datos no disponible (reintentar). Un navegador de un origen no incluido en `WEB_ORIGINS` recibe 403 en el handshake. El servidor envía pings de protocolo cada 20 s; el límite de mensajes es 64 KiB. Si un proxy bloquea WebSocket, el cliente puede usar SSE con el mismo cursor.
+
+### Carnet QR firmado (XN2)
+
+`XN2:<id_usuarios>:<paso>:<firma>` donde `paso = floor(unix_segundos/15)` y `firma` son los primeros 20 caracteres Base32 de `HMAC-SHA256(clave, "XN2:<id>:<paso>")`. La `clave` (Base64URL) se obtiene con `GET /auth/credencial-qr`; se deriva de `QR_SECRET` (o de `JWT_SECRET` con separación de dominio) y de `auth_version`, por lo que cerrar sesión, cambiar contraseña o desactivar la cuenta revoca los carnets emitidos. Solo usa caracteres del modo alfanumérico de QR: el código cabe en una versión 3 con corrección Q y se lee de pantalla a pantalla.
+
+`POST /ingresos` con `{"codigo_qr":"XN2:…","tipo":"ENTRADA","metodo":"QR","request_id":"<uuid>"}` verifica la firma en el servidor (`422 INVALID_QR`) y la vigencia de ±45 s (`422 QR_EXPIRED`) frente a la hora del servidor o, si se envía, frente a `escaneado_en`. `escaneado_en` (ISO 8601 con zona) permite sincronizar movimientos tomados sin conexión hasta 72 h después (`422 INVALID_SCAN_TIME` fuera de rango); el movimiento conserva esa hora para la asistencia. El reenvío con el mismo `request_id` es idempotente. Los formatos heredados (`id_usuarios`) siguen aceptándose salvo que `QR_REQUIRE_SIGNED=true`, que exige el carnet firmado para el método QR (`422 QR_UNSIGNED`).
 
 Errores: 400 JSON/token inválido, 401 sesión ausente/vencida/revocada, 403 permiso/origen, 404 recurso/ruta, 409 duplicado/referencia/secuencia/concurrencia, 413 tamaño, 422 validación, 429 límite, 500 error interno, 503 correo no configurado. `detail` replica el mensaje para facilitar adaptación del cliente anterior. Los errores internos no exponen SQL ni stack.
 

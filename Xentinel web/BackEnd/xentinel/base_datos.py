@@ -13,6 +13,7 @@ VERSIONES = (
     "002_security_realtime",
     "003_programas_admin",
     "004_perfil_asistencia",
+    "005_rls_correo_opcional",
 )
 
 
@@ -33,19 +34,23 @@ class Consultas:
             return cursor.execute(consulta, parametros or None).rowcount
 
 
+def configurar_sesion(conexion):
+    # Con SET y no con "options" de arranque: los poolers (Supavisor, PgBouncer) no las reenvían.
+    conexion.execute("SET timezone TO 'UTC'")
+    conexion.execute("SET statement_timeout TO 10000")
+    conexion.commit()
+
+
 class BaseDatos:
-    def __init__(self, url):
+    def __init__(self, url, maximo=15):
         self.pool = ConnectionPool(
             url,
             min_size=1,
-            max_size=15,
+            max_size=maximo,
             open=False,
             timeout=5,
-            kwargs={
-                "row_factory": dict_row,
-                "connect_timeout": 5,
-                "options": "-c timezone=UTC -c statement_timeout=10000",
-            },
+            configure=configurar_sesion,
+            kwargs={"row_factory": dict_row, "connect_timeout": 5},
         )
 
     @contextmanager

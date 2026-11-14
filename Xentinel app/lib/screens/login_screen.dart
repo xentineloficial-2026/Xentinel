@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -8,6 +9,8 @@ import '../core/session.dart';
 import '../core/theme.dart';
 
 import '../providers/auth_provider.dart';
+import '../services/biometric_service.dart';
+import '../services/credential_store.dart';
 import '../services/server_settings.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -41,6 +44,22 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     }
   }
 
+  /// El carnet guardado se muestra sin internet, protegido por la biometría o el
+  /// PIN del teléfono.
+  Future<void> _openOfflineCarnet() async {
+    final verified = await ref.read(biometricServiceProvider).authenticate();
+    if (!mounted) return;
+    if (!verified) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('Verificación biométrica cancelada.')),
+        );
+      return;
+    }
+    context.push('/carnet-offline');
+  }
+
   Future<void> _editServer() async {
     final saved = await showDialog<bool>(
       context: context,
@@ -52,6 +71,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final loading = ref.watch(authControllerProvider).isLoading;
+    final offlineCarnet = ref.watch(
+      credentialStoreProvider.select(
+        (store) => store.current?.isUsableAt(DateTime.now()) ?? false,
+      ),
+    );
     final server = Uri.tryParse(ApiConfig.baseUrl)?.authority ?? '';
     final sessionMessage = ref.watch(sessionProvider).message;
 
@@ -86,7 +110,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       const SizedBox(height: 28),
                       Entrance(
                         child: GlassPanel(
-                          child: _form(loading, sessionMessage, server),
+                          child: _form(
+                            loading,
+                            sessionMessage,
+                            server,
+                            offlineCarnet,
+                          ),
                         ),
                       ),
                     ],
@@ -100,7 +129,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     );
   }
 
-  Widget _form(bool loading, String? sessionMessage, String server) => Column(
+  Widget _form(
+    bool loading,
+    String? sessionMessage,
+    String server,
+    bool offlineCarnet,
+  ) => Column(
     mainAxisSize: MainAxisSize.min,
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
@@ -170,7 +204,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         onPressed: loading ? null : () => context.push('/forgot-password'),
         child: const Text('¿Olvidaste tu contraseña?'),
       ),
-      if (!ApiConfig.hasFixedServer)
+      if (offlineCarnet) ...[
+        const SizedBox(height: 4),
+        OutlinedButton.icon(
+          onPressed: loading ? null : _openOfflineCarnet,
+          icon: const Icon(Icons.qr_code_2),
+          label: const Text('Mostrar mi carnet sin conexión'),
+        ),
+      ],
+      if (ApiConfig.allowServerOverride)
         TextButton.icon(
           onPressed: loading ? null : _editServer,
           icon: const Icon(
@@ -212,7 +254,11 @@ class _ServerDialogState extends State<_ServerDialog> {
   Future<void> _testAndSave() async {
     final url = ApiConfig.normalizeServer(_controller.text);
     if (url == null) {
-      setState(() => _error = 'Escribe una dirección como 192.168.1.40:8000');
+      setState(
+        () => _error = kReleaseMode
+            ? 'Escribe una dirección como https://xentinel.midominio.co'
+            : 'Escribe una dirección como 192.168.1.40:8000',
+      );
       return;
     }
     setState(() {
@@ -243,7 +289,9 @@ class _ServerDialogState extends State<_ServerDialog> {
         keyboardType: TextInputType.url,
         decoration: InputDecoration(
           labelText: 'Dirección',
-          hintText: '192.168.1.40:8000 o https://mi-tunel',
+          hintText: kReleaseMode
+              ? 'https://xentinel.midominio.co'
+              : '192.168.1.40:8000 o https://mi-servidor',
           errorText: _error,
           errorMaxLines: 4,
         ),

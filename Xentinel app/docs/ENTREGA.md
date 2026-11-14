@@ -1,3 +1,19 @@
+# Entrega del 14 de noviembre de 2026 — v1.1.1 (4)
+
+Producción en la nube, sin IP locales ni puertos, y lectura QR de celular a celular.
+
+- **Despliegue:** API FastAPI en Render (`https://xentinel-api.onrender.com`), web estática en Render y base PostgreSQL en Supabase (Session pooler IPv4, rol propio `xentinel_api` sin privilegios de administrador, RLS en todas las tablas). La app trae la URL de producción por defecto; HTTP y el diálogo de servidor solo existen en compilaciones de desarrollo.
+- **Tiempo real:** WebSocket seguro autenticado por mensaje, con respaldo SSE y consulta de seguridad; reconexión inmediata al cambiar de red (`connectivity_plus`), espera exponencial con variación aleatoria, vigilancia de inactividad y sincronización del reloj del servidor.
+- **Sesión:** renovación automática del JWT (`POST /auth/renovar`) con duración máxima configurable; las alertas y el canal no se reinician al renovar.
+- **Sin conexión:** cola persistente e idempotente de accesos con la hora del escaneo; carnet firmado guardado en Keystore/Keychain y accesible sin sesión tras biometría.
+- **QR:** carnet `XN2` firmado (HMAC‑SHA256, verificado y revocable en el servidor), alfanumérico versión 3 con corrección Q, hasta 320 dp y brillo máximo. Escáner a 1280×720 con zoom automático, enfoque al tocar, zoom manual, preferencia por códigos Xentinel y antirrebote por persona. El lector web acepta el carnet de la app.
+- **Producción:** Android sin tráfico en claro ni copias de seguridad de datos de la app, código ofuscado y una sola APK arm64.
+- **Backend:** módulo `credenciales.py`, WebSocket `/api/v1/tiempo-real`, `codigo_qr` y `escaneado_en` en `POST /ingresos`, migración `004_rls_correo_opcional`, SMTP opcional en producción y pool configurable (`DB_POOL_MAX`).
+
+Instalación: `INSTALAR_APK.md`. Pruebas en teléfonos reales: `VALIDACION.md`.
+
+---
+
 # Entrega del 24 de octubre de 2026
 
 Se conserva Flutter/Dart por elección explícita del usuario. Versión **1.0.1 (2)**; paquete `co.edu.sena.xentinel`.

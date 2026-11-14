@@ -9,9 +9,13 @@ import '../components/xentinel_motion.dart';
 import '../core/errors.dart';
 import '../core/theme.dart';
 import '../models/xentinel_models.dart';
+import '../providers/carnet_provider.dart';
 import '../repositories/access_repository.dart';
+import '../services/access_outbox.dart';
+import '../services/background_sync.dart';
 import '../services/feedback_service.dart';
 import '../services/camera_session.dart';
+import '../services/network_status.dart';
 import '../core/route_observer.dart';
 
 class ScannerScreen extends ConsumerStatefulWidget {
@@ -26,6 +30,11 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
   static const Duration _resultDuration = Duration(milliseconds: 2500);
   static const Duration _grantedDuration = Duration(milliseconds: 4000);
 
+  /// El carnet rota cada 15 s: tras un resultado definitivo, la misma persona en la
+  /// misma dirección no se vuelve a procesar durante unos segundos aunque cambie el
+  /// código (evita "Movimiento fuera de orden" si el teléfono sigue frente a la cámara).
+  static const Duration _samePersonCooldown = Duration(seconds: 6);
+
   final _driver = MobileScannerDriver();
   late final CameraSession _camera;
   StreamSubscription<BarcodeCapture>? _barcodes;
@@ -36,6 +45,8 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
   AccessScanResult? _result;
   Timer? _resetTimer;
   String? _lastConfirmedPayload;
+  final _recentPeople = <String, DateTime>{};
+  double _zoomAtScaleStart = 0;
 
   @override
   void initState() {
@@ -52,7 +63,7 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text(
-                'No se pudo leer el QR. Intenta acercarlo nuevamente.',
+                'No se pudo leer el QR. Aleja un poco el teléfono y mantenlo quieto.',
               ),
             ),
           );
@@ -97,15 +108,32 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
     super.dispose();
   }
 
-  Future<void> _onDetect(BarcodeCapture capture) async {
-    if (_busy || !_camera.canScan) return;
-    final raw = capture.barcodes
+  /// Entre varios códigos en el cuadro, el de Xentinel; si no hay, el primero.
+  static String? _pickPayload(BarcodeCapture capture) {
+    final values = capture.barcodes
         .map((b) => b.rawValue)
         .whereType<String>()
-        .firstOrNull;
-    if (raw == null || raw.isEmpty) return;
+        .where((v) => v.isNotEmpty)
+        .toList();
+    return values
+            .where((v) => AccessRepository.userIdOf(v) != null)
+            .firstOrNull ??
+        values.firstOrNull;
+  }
+
+  Future<void> _onDetect(BarcodeCapture capture) async {
+    if (_busy || !_camera.canScan) return;
+    final raw = _pickPayload(capture);
+    if (raw == null) return;
     final scanKey = '$raw:$_exitMode';
     if (scanKey == _lastConfirmedPayload) return;
+    final person = AccessRepository.userIdOf(raw);
+    final personKey = '$person:$_exitMode';
+    final now = DateTime.now();
+    _recentPeople.removeWhere(
+      (_, at) => now.difference(at) > _samePersonCooldown,
+    );
+    if (person != null && _recentPeople.containsKey(personKey)) return;
 
     setState(() => _busy = true);
     final isExit = _exitMode;
@@ -118,7 +146,10 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
       result = Unconfirmed(reason: describeError(e));
     }
     if (!mounted) return;
-    if (result is! Unconfirmed) _lastConfirmedPayload = scanKey;
+    if (result is! Unconfirmed) {
+      _lastConfirmedPayload = scanKey;
+      if (person != null) _recentPeople[personKey] = DateTime.now();
+    }
 
     setState(() => _result = result);
     if (_camera.canScan) {
@@ -126,7 +157,9 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
     }
 
     // Con datos en pantalla, el celador necesita un poco más de tiempo para leerlos.
-    final duration = result is Granted ? _grantedDuration : _resultDuration;
+    final duration = result is Granted || result is QueuedOffline
+        ? _grantedDuration
+        : _resultDuration;
     _resetTimer = Timer(duration, () {
       if (!mounted) return;
       setState(() {
@@ -143,7 +176,16 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
     Denied() => Icons.block,
     VisitorAccess() => Icons.person_outline,
     Unconfirmed() => Icons.cloud_off,
+    QueuedOffline() => Icons.cloud_upload_outlined,
   };
+
+  Future<void> _setZoom(double value) async {
+    try {
+      await _driver.controller.setZoomScale(value.clamp(0.0, 1.0));
+    } catch (_) {
+      // Cámara sin zoom o detenida: se ignora.
+    }
+  }
 
   Future<void> _openSettings() async {
     final opened = await _camera.openSettings();
@@ -156,6 +198,15 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
         ),
       );
     }
+  }
+
+  void _showQueue() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (_) => const _QueueSheet(),
+    );
   }
 
   Widget _cameraStatus() {
@@ -217,6 +268,11 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
   @override
   Widget build(BuildContext context) {
     final result = _result;
+    final online = ref.watch(networkStatusProvider.select((n) => n.online));
+    final operator = ref.watch(currentUserProvider)?.id;
+    final outbox = ref.watch(accessOutboxProvider);
+    final pending = operator == null ? 0 : outbox.pendingFor(operator).length;
+    final issues = outbox.issues.length;
 
     return AnimatedBuilder(
       animation: _camera,
@@ -224,6 +280,22 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
         appBar: AppBar(
           title: const Text('Escáner de acceso'),
           actions: [
+            if (pending > 0 || issues > 0)
+              IconButton(
+                tooltip: 'Registros sin conexión',
+                onPressed: _showQueue,
+                icon: Badge(
+                  label: Text('${pending > 0 ? pending : issues}'),
+                  backgroundColor: pending > 0
+                      ? const Color(0xFF18458D)
+                      : XentinelTheme.alarm,
+                  child: Icon(
+                    pending > 0
+                        ? Icons.cloud_upload_outlined
+                        : Icons.report_outlined,
+                  ),
+                ),
+              ),
             ValueListenableBuilder<MobileScannerState>(
               valueListenable: _driver.controller,
               builder: (context, state, _) => IconButton(
@@ -260,44 +332,101 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
           children: [
             if (_camera.previewMounted)
               Positioned.fill(
-                // Keep the mounted preview stable during pause/resume. Only the
-                // session owns camera operations; the widget never auto-starts it.
-                child: MobileScanner(
-                  controller: _driver.controller,
-                  useAppLifecycleState: false,
-                  errorBuilder: (_, __) => _cameraStatus(),
+                // Pellizcar para acercar: con zoom el teléfono puede quedar a una
+                // distancia en la que la cámara sí enfoca la otra pantalla.
+                child: GestureDetector(
+                  onScaleStart: (_) =>
+                      _zoomAtScaleStart = _driver.controller.value.zoomScale,
+                  onScaleUpdate: (details) {
+                    if (details.pointerCount < 2) return;
+                    unawaited(
+                      _setZoom(_zoomAtScaleStart + (details.scale - 1) * 0.5),
+                    );
+                  },
+                  // Keep the mounted preview stable during pause/resume. Only the
+                  // session owns camera operations; the widget never auto-starts it.
+                  child: MobileScanner(
+                    controller: _driver.controller,
+                    useAppLifecycleState: false,
+                    tapToFocus: true,
+                    errorBuilder: (_, __) => _cameraStatus(),
+                  ),
                 ),
               ),
             // Marco guía: oscurece alrededor para que el ojo vaya directo al código.
             if (_camera.canScan) const Positioned.fill(child: _ScanFrame()),
-            // Selector entrada / salida
+            if (_camera.canScan)
+              Positioned(
+                left: 16,
+                right: 16,
+                top: 12,
+                child: IgnorePointer(
+                  child: _ScannerHint(online: online, pending: pending),
+                ),
+              ),
+            // Zoom y selector entrada / salida
             if (_camera.canScan)
               Positioned(
                 left: 16,
                 right: 16,
                 bottom: 16,
                 child: SafeArea(
-                  child: GlassPanel(
-                    padding: const EdgeInsets.all(6),
-                    child: SegmentedButton<bool>(
-                      showSelectedIcon: false,
-                      segments: const [
-                        ButtonSegment(
-                          value: false,
-                          label: Text('ENTRADA'),
-                          icon: Icon(Icons.login),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ValueListenableBuilder<MobileScannerState>(
+                        valueListenable: _driver.controller,
+                        builder: (context, state, _) => GlassPanel(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.zoom_out,
+                                size: 20,
+                                color: XentinelTheme.steel,
+                              ),
+                              Expanded(
+                                child: Slider(
+                                  value: state.zoomScale.clamp(0.0, 1.0),
+                                  onChanged: (value) =>
+                                      unawaited(_setZoom(value)),
+                                  semanticFormatterCallback: (value) =>
+                                      'Zoom ${(value * 100).round()} %',
+                                ),
+                              ),
+                              const Icon(
+                                Icons.zoom_in,
+                                size: 20,
+                                color: XentinelTheme.steel,
+                              ),
+                            ],
+                          ),
                         ),
-                        ButtonSegment(
-                          value: true,
-                          label: Text('SALIDA'),
-                          icon: Icon(Icons.logout),
+                      ),
+                      const SizedBox(height: 10),
+                      GlassPanel(
+                        padding: const EdgeInsets.all(6),
+                        child: SegmentedButton<bool>(
+                          showSelectedIcon: false,
+                          segments: const [
+                            ButtonSegment(
+                              value: false,
+                              label: Text('ENTRADA'),
+                              icon: Icon(Icons.login),
+                            ),
+                            ButtonSegment(
+                              value: true,
+                              label: Text('SALIDA'),
+                              icon: Icon(Icons.logout),
+                            ),
+                          ],
+                          selected: {_exitMode},
+                          onSelectionChanged: _busy
+                              ? null
+                              : (s) => setState(() => _exitMode = s.first),
                         ),
-                      ],
-                      selected: {_exitMode},
-                      onSelectionChanged: _busy
-                          ? null
-                          : (s) => setState(() => _exitMode = s.first),
-                    ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -337,6 +466,124 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
                   child: _cameraStatus(),
                 ),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Indicaciones de lectura y estado de la conexión.
+class _ScannerHint extends StatelessWidget {
+  const _ScannerHint({required this.online, required this.pending});
+  final bool online;
+  final int pending;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = online
+        ? pending > 0
+              ? 'Enviando $pending registro(s) guardado(s) sin conexión…'
+              : 'Carnet a 20–30 cm · Toca para enfocar · Pellizca para acercar'
+        : 'Sin conexión: los accesos se guardan y se envían solos al volver la red. Verifica el documento.';
+    return GlassPanel(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Row(
+        children: [
+          Icon(
+            online ? Icons.center_focus_strong : Icons.cloud_off,
+            size: 18,
+            color: online ? XentinelTheme.mist : XentinelTheme.warning,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(fontSize: 13, color: XentinelTheme.text),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Registros guardados sin conexión e incidencias de la sincronización.
+class _QueueSheet extends ConsumerWidget {
+  const _QueueSheet();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final operator = ref.watch(currentUserProvider)?.id;
+    final outbox = ref.watch(accessOutboxProvider);
+    final pending = operator == null
+        ? const <PendingAccess>[]
+        : outbox.pendingFor(operator);
+    final issues = outbox.issues;
+    final online = ref.watch(networkStatusProvider.select((n) => n.online));
+    String time(DateTime at) =>
+        TimeOfDay.fromDateTime(at.toLocal()).format(context);
+
+    return SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.75,
+        ),
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+          children: [
+            Text(
+              'Registros sin conexión',
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              pending.isEmpty
+                  ? 'No hay registros pendientes de enviar.'
+                  : online
+                  ? '${pending.length} pendiente(s). Se envían automáticamente.'
+                  : '${pending.length} pendiente(s). Se enviarán al recuperar la conexión.',
+              style: const TextStyle(color: XentinelTheme.steel),
+            ),
+            for (final entry in pending)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.schedule),
+                title: Text('ID ${entry.userId} · ${entry.type}'),
+                subtitle: Text('Escaneado a las ${time(entry.scannedAt)}'),
+              ),
+            if (pending.isNotEmpty && online) ...[
+              const SizedBox(height: 8),
+              FilledButton.icon(
+                onPressed: () => ref.read(backgroundSyncProvider).flush(),
+                icon: const Icon(Icons.cloud_upload_outlined),
+                label: const Text('Enviar ahora'),
+              ),
+            ],
+            if (issues.isNotEmpty) ...[
+              const SizedBox(height: 20),
+              const Text(
+                'Requieren revisión',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+              ),
+              for (final issue in issues)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(
+                    Icons.report_outlined,
+                    color: XentinelTheme.alarm,
+                  ),
+                  title: Text(
+                    '${issue.name ?? 'ID ${issue.userId}'} · ${issue.type} · ${time(issue.scannedAt)}',
+                  ),
+                  subtitle: Text(issue.reason),
+                ),
+              TextButton(
+                onPressed: () => ref.read(accessOutboxProvider).clearIssues(),
+                child: const Text('Marcar como revisados'),
+              ),
+            ],
           ],
         ),
       ),
@@ -497,6 +744,10 @@ class _ResultOverlay extends StatelessWidget {
       Denied(:final reason) => reason,
       Alert(:final reason) => reason,
       Unconfirmed(:final reason) => reason,
+      QueuedOffline(:final userId, :final repeated) =>
+        '${repeated ? 'Ya estaba guardado' : 'Carnet ID $userId guardado'}. '
+            'Se enviará automáticamente al volver la conexión. '
+            'Verifica el documento de identidad antes de permitir el paso.',
       _ => null,
     };
 

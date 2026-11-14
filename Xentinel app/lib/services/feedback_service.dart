@@ -6,6 +6,13 @@ import '../models/xentinel_models.dart';
 
 /// Vibración + sonido según el resultado del escaneo.
 class FeedbackService {
+  FeedbackService() {
+    // Sonidos cortos: modo de baja latencia (SoundPool en Android) para que el
+    // celador escuche el resultado en el mismo instante en que aparece.
+    _player.setPlayerMode(PlayerMode.lowLatency).catchError((Object _) {});
+    _player.setReleaseMode(ReleaseMode.stop).catchError((Object _) {});
+  }
+
   final AudioPlayer _player = AudioPlayer();
 
   Future<void> emergency() async {
@@ -26,6 +33,7 @@ class FeedbackService {
       Denied() => ('sounds/error.wav', <int>[0, 500]),
       VisitorAccess() => ('sounds/ok.wav', <int>[0, 100, 80, 100]),
       Unconfirmed() => ('sounds/warn.wav', <int>[0, 200, 100, 200]),
+      QueuedOffline() => ('sounds/ok.wav', <int>[0, 120, 90, 120, 90, 120]),
     };
 
     try {

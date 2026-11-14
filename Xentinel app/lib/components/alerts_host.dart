@@ -22,7 +22,8 @@ class _AlertsHostState extends ConsumerState<AlertsHost>
   final _announced = <String>{};
   // Alertas que la persona ya atendió; si el mensaje cambia, vuelve a interrumpir.
   final _acknowledged = <String>{};
-  String? _lastToken;
+  // Se reinician al cambiar la persona, no al renovar su token.
+  String? _lastUser;
   bool get _foreground =>
       WidgetsBinding.instance.lifecycleState == null ||
       WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
@@ -66,10 +67,13 @@ class _AlertsHostState extends ConsumerState<AlertsHost>
   @override
   Widget build(BuildContext context) {
     final token = ref.watch(sessionProvider.select((session) => session.token));
-    if (_lastToken != token) {
+    final userId = ref.watch(
+      sessionProvider.select((session) => session.user?.id),
+    );
+    if (_lastUser != userId) {
       _announced.clear();
       _acknowledged.clear();
-      _lastToken = token;
+      _lastUser = userId;
     }
     final monitor = ref.watch(alertsProvider);
     WidgetsBinding.instance.addPostFrameCallback((_) {

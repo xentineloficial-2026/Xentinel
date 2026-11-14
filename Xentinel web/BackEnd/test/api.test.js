@@ -1,7 +1,8 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { createDecipheriv, randomBytes, randomUUID } from 'node:crypto';
+import { createDecipheriv, createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { request as httpRequest } from 'node:http';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { createPool } from '../src/db.js';
@@ -97,11 +98,23 @@ test('migraciones repetibles y esquema esperado', async () => {
   // El migrador anterior verifica que FastAPI conserva los checksums existentes.
   await migrate(pool);
   await migrarFastApi(config.DATABASE_URL);
-  assert.equal((await pool.query('SELECT count(*)::int n FROM schema_migrations')).rows[0].n, 3);
+  assert.equal((await pool.query('SELECT count(*)::int n FROM schema_migrations')).rows[0].n, 5);
   const result = await pool.query(
     "SELECT column_name FROM information_schema.columns WHERE table_name='password_reset_tokens'",
   );
   assert.ok(result.rows.some((c) => c.column_name === 'token_expiracion'));
+  const usuarios = await pool.query(
+    `SELECT column_name, is_nullable, column_default FROM information_schema.columns
+    WHERE table_name='usuarios' AND column_name IN ('correo','id_rol') ORDER BY column_name`,
+  );
+  assert.deepEqual(usuarios.rows, [
+    { column_name: 'correo', is_nullable: 'YES', column_default: null },
+    { column_name: 'id_rol', is_nullable: 'NO', column_default: null },
+  ]);
+  const sinRls = await pool.query(
+    "SELECT relname FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind='r' AND NOT relrowsecurity",
+  );
+  assert.deepEqual(sinRls.rows, []);
 });
 test('Swagger, disponibilidad y login heredado mantienen sus contratos', async () => {
   assert.deepEqual((await request('/health')).body, { status: 'ok' });
@@ -629,6 +642,271 @@ test('reporte diario respeta medianoche en Bogotá, cursor y permiso de administ
   assert.equal(segundo.body.meta.siguiente, null);
 });
 
+const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+function base32(bytes) {
+  let bits = 0,
+    valor = 0,
+    salida = '';
+  for (const byte of bytes) {
+    valor = (valor << 8) | byte;
+    bits += 8;
+    while (bits >= 5) {
+      salida += BASE32[(valor >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+  if (bits > 0) salida += BASE32[(valor << (5 - bits)) & 31];
+  return salida;
+}
+// Mismo algoritmo que la app Flutter: si esto cambia, el carnet deja de validar.
+function codigoXn2(clave, id, paso) {
+  const firma = base32(createHmac('sha256', clave).update(`XN2:${id}:${paso}`).digest()).slice(0, 20);
+  return `XN2:${id}:${paso}:${firma}`;
+}
+const pasoActual = (ms = Date.now()) => Math.floor(ms / 15000);
+function abrirCanal(token, cursor, opciones) {
+  const ws = new WebSocket(`${base.replace('http', 'ws')}/api/v1/tiempo-real`, opciones);
+  const mensajes = [];
+  const esperas = [];
+  ws.addEventListener('message', (evento) => {
+    const datos = JSON.parse(evento.data);
+    mensajes.push(datos);
+    for (const espera of [...esperas]) {
+      if (espera.condicion(datos)) {
+        esperas.splice(esperas.indexOf(espera), 1);
+        espera.resolver(datos);
+      }
+    }
+  });
+  const cierre = new Promise((resolver) => ws.addEventListener('close', (evento) => resolver(evento.code)));
+  const abierto = new Promise((resolver, rechazar) => {
+    ws.addEventListener('open', resolver);
+    ws.addEventListener('error', rechazar);
+  });
+  // Un rechazo del handshake se observa en `cierre`; no es un error sin manejar.
+  abierto.catch(() => {});
+  return {
+    ws,
+    mensajes,
+    cierre,
+    async autenticar() {
+      await abierto;
+      ws.send(JSON.stringify({ tipo: 'auth', token, cursor }));
+    },
+    esperar(condicion, ms = 5000) {
+      const previo = mensajes.find(condicion);
+      if (previo) return Promise.resolve(previo);
+      return new Promise((resolver, rechazar) => {
+        const reloj = setTimeout(() => rechazar(new Error(`Sin mensaje: ${JSON.stringify(mensajes)}`)), ms);
+        esperas.push({ condicion, resolver: (d) => (clearTimeout(reloj), resolver(d)) });
+      });
+    },
+  };
+}
+test('carnet QR firmado XN2: emisión, verificación, vigencia, sincronización sin conexión y revocación', async () => {
+  // Sesión propia: otra prueba revoca los tokens iniciales de esta persona.
+  const ingreso = await api('/auth/login', {
+    method: 'POST',
+    body: { documento: '10004', contrasena: password },
+  });
+  const tokenTitular = ingreso.body.data.access_token;
+  const credencial = await api('/auth/credencial-qr', { token: tokenTitular });
+  assert.equal(credencial.status, 200, JSON.stringify(credencial.body));
+  const { clave, paso_segundos, id_usuarios, formato } = credencial.body.data;
+  assert.equal(formato, 'XN2');
+  assert.equal(paso_segundos, 15);
+  assert.equal(id_usuarios, otherId);
+  const claveBytes = Buffer.from(clave, 'base64url');
+  // La clave se deriva del secreto del servidor y de auth_version (revocable).
+  const {
+    rows: [{ auth_version: version }],
+  } = await pool.query('SELECT auth_version FROM usuarios WHERE id_usuarios=$1', [otherId]);
+  const secreto = createHmac('sha256', config.JWT_SECRET).update('xentinel-qr-v2').digest();
+  assert.deepEqual(claveBytes, createHmac('sha256', secreto).update(`XN2|${otherId}|${version}`).digest());
+  const registrar = (body, token = guardToken) =>
+    api('/ingresos', {
+      method: 'POST',
+      token,
+      body: { tipo: 'ENTRADA', metodo: 'QR', request_id: randomUUID(), ...body },
+    });
+  const codigo = codigoXn2(claveBytes, otherId, pasoActual());
+  assert.match(codigo, /^[0-9A-Z:]+$/);
+  // Un aprendiz no registra accesos aunque tenga un código válido.
+  assert.equal((await registrar({ codigo_qr: codigo }, tokenTitular)).status, 403);
+  const alterado = codigo.slice(0, -1) + (codigo.endsWith('A') ? 'B' : 'A');
+  assert.equal((await registrar({ codigo_qr: alterado })).body.error.code, 'INVALID_QR');
+  assert.equal((await registrar({ codigo_qr: 'XENTINEL:1:2' })).body.error.code, 'INVALID_QR');
+  assert.equal((await registrar({ codigo_qr: codigo, metodo: 'Manual' })).status, 422);
+  assert.equal(
+    (await registrar({ codigo_qr: codigo, id_usuarios: studentId })).body.error.code,
+    'INVALID_QR',
+  );
+  const vencido = await registrar({ codigo_qr: codigoXn2(claveBytes, otherId, pasoActual() - 10) });
+  assert.equal(vencido.body.error.code, 'QR_EXPIRED');
+  // Escaneo hecho sin conexión hace 10 minutos: se valida contra la hora del escaneo.
+  const hace10 = Date.now() - 10 * 60 * 1000;
+  const offline = {
+    codigo_qr: codigoXn2(claveBytes, otherId, pasoActual(hace10)),
+    escaneado_en: new Date(hace10).toISOString(),
+    request_id: randomUUID(),
+  };
+  const sincronizado = await registrar(offline);
+  assert.equal(sincronizado.status, 201, JSON.stringify(sincronizado.body));
+  assert.equal(sincronizado.body.data.id_usuarios, otherId);
+  assert.equal(sincronizado.body.data.metodo, 'QR');
+  assert.equal(sincronizado.body.data.fechahora, new Date(hace10).toISOString());
+  assert.equal(sincronizado.body.data.persona.nombres_completos, 'Laura Ríos');
+  // Reenviar la cola tras perder la respuesta no duplica el movimiento.
+  const repetido = await registrar(offline);
+  assert.equal(repetido.status, 200);
+  assert.equal(repetido.body.data.id_acceso, sincronizado.body.data.id_acceso);
+  const salida = await registrar({ codigo_qr: codigoXn2(claveBytes, otherId, pasoActual()), tipo: 'SALIDA' });
+  assert.equal(salida.status, 201, JSON.stringify(salida.body));
+  assert.equal(
+    (
+      await registrar({
+        codigo_qr: codigoXn2(claveBytes, otherId, pasoActual()),
+        escaneado_en: new Date(Date.now() - 4 * 86400000).toISOString(),
+      })
+    ).body.error.code,
+    'INVALID_SCAN_TIME',
+  );
+  // Cerrar sesión revoca también los carnets guardados para usar sin conexión.
+  assert.equal((await api('/auth/logout', { method: 'POST', token: tokenTitular })).status, 204);
+  const revocado = await registrar({
+    codigo_qr: codigoXn2(claveBytes, otherId, pasoActual()),
+    tipo: 'ENTRADA',
+  });
+  assert.equal(revocado.body.error.code, 'INVALID_QR');
+});
+test('renovación de sesión conserva el ingreso original y respeta la duración máxima', async () => {
+  const renovada = await api('/auth/renovar', { method: 'POST', token: guardToken });
+  assert.equal(renovada.status, 200, JSON.stringify(renovada.body));
+  const original = jwt.decode(guardToken);
+  const nueva = jwt.decode(renovada.body.data.access_token);
+  assert.equal(nueva.auth_time, original.auth_time);
+  assert.ok(nueva.exp >= original.exp);
+  assert.equal(renovada.body.data.usuario.nombre_rol, 'Celador');
+  assert.equal((await api('/auth/me', { token: renovada.body.data.access_token })).status, 200);
+  const antigua = jwt.sign(
+    { ver: original.ver, auth_time: Math.floor(Date.now() / 1000) - 13 * 3600 },
+    config.JWT_SECRET,
+    { subject: original.sub, issuer: 'xentinel-api', audience: 'xentinel-clients', expiresIn: 60 },
+  );
+  const vencida = await api('/auth/renovar', { method: 'POST', token: antigua });
+  assert.equal(vencida.status, 401);
+  assert.equal(vencida.body.error.code, 'SESSION_MAX_AGE');
+  assert.equal((await api('/auth/renovar', { method: 'POST' })).status, 401);
+});
+test('canal WebSocket: autenticación por mensaje, cambios filtrados, ping y rechazos', async () => {
+  const {
+    rows: [max],
+  } = await pool.query('SELECT coalesce(max(id_evento),0)::text last FROM api_events');
+  const abiertos = [];
+  const abrir = (...args) => {
+    const nuevo = abrirCanal(...args);
+    abiertos.push(nuevo.ws);
+    return nuevo;
+  };
+  // Un canal abierto impediría detener el servidor de pruebas si una aserción falla.
+  try {
+    const canal = abrir(studentToken, max.last);
+    await canal.autenticar();
+    const listo = await canal.esperar((m) => m.tipo === 'listo');
+    assert.equal(listo.cursor, max.last);
+    assert.ok(Math.abs(listo.servidor_ms - Date.now()) < 5000);
+    await pool.query('UPDATE usuarios SET telefono=$1 WHERE id_usuarios=$2', ['7654321', otherId]);
+    await pool.query(
+      `INSERT INTO alertas_emergencia(tipo_alerta,mensaje,severidad,emisor_id)
+    VALUES('Simulacro','Cambio por WebSocket','informativa',$1)`,
+      [adminId],
+    );
+    const cambio = await canal.esperar((m) => m.tipo === 'change' && m.data.recurso === 'alertas_emergencia');
+    assert.ok(Number(cambio.id) > Number(max.last));
+    assert.ok(!canal.mensajes.some((m) => m.data?.recurso === 'usuarios'), JSON.stringify(canal.mensajes));
+    canal.ws.send(JSON.stringify({ tipo: 'ping' }));
+    assert.ok((await canal.esperar((m) => m.tipo === 'pong')).servidor_ms > 0);
+    // Renovar el token no corta el canal.
+    canal.ws.send(JSON.stringify({ tipo: 'auth', token: studentToken }));
+    await canal.esperar((m) => m.tipo === 'auth-ok');
+    canal.ws.close(1000);
+    await canal.cierre;
+
+    const invalido = abrir('no-es-un-token', '0');
+    await invalido.autenticar();
+    assert.equal(await invalido.cierre, 4401);
+    const cursor = abrir(studentToken, '999999999999999999');
+    await cursor.autenticar();
+    assert.equal(await cursor.cierre, 4409);
+    // Un navegador de otro origen no puede abrir el canal con la sesión de la persona.
+    const rechazo = await new Promise((resolver, rechazar) => {
+      const solicitud = httpRequest(`${base}/api/v1/tiempo-real`, {
+        headers: {
+          Connection: 'Upgrade',
+          Upgrade: 'websocket',
+          Origin: 'https://evil.example',
+          'Sec-WebSocket-Version': '13',
+          'Sec-WebSocket-Key': randomBytes(16).toString('base64'),
+        },
+      });
+      solicitud.on('response', (respuesta) => {
+        respuesta.resume();
+        resolver(respuesta.statusCode);
+      });
+      solicitud.on('upgrade', (respuesta, socket) => {
+        socket.destroy();
+        resolver(respuesta.statusCode);
+      });
+      solicitud.on('error', rechazar);
+      solicitud.end();
+    });
+    assert.equal(rechazo, 403);
+  } finally {
+    for (const ws of abiertos) ws.close();
+  }
+});
+test('límites por persona autenticada (sedes detrás de NAT) y por cuenta en el login', async () => {
+  const clave = (grupo, sujeto) => createHash('sha256').update(`${grupo}:${sujeto}`).digest('hex');
+  const saturar = (key) =>
+    pool.query(
+      `INSERT INTO api_rate_limits(key,hits,expires_at) VALUES($1,100000,now()+interval '5 minutes')
+      ON CONFLICT (key) DO UPDATE SET hits=100000,expires_at=now()+interval '5 minutes'`,
+      [key],
+    );
+  await pool.query('DELETE FROM api_rate_limits');
+  const ingreso = await api('/auth/login', {
+    method: 'POST',
+    body: { documento: '10001', contrasena: password },
+  });
+  const token = ingreso.body.data.access_token;
+  // Toda la sede comparte la IP pública: saturarla no bloquea a quien ya inició sesión.
+  await saturar(clave('api', '127.0.0.1'));
+  assert.equal((await api('/auth/me', { token })).status, 200);
+  assert.equal((await api('/auth/me')).status, 429);
+  // Un token con firma falsa no usa el cupo de otra persona.
+  const falso = jwt.sign({ ver: 0 }, 'otro-secreto'.repeat(6), {
+    subject: jwt.decode(token).sub,
+    issuer: 'xentinel-api',
+    audience: 'xentinel-clients',
+  });
+  assert.equal((await api('/auth/me', { token: falso })).status, 429);
+  await saturar(clave('api', `usuario:${jwt.decode(token).sub}`));
+  assert.equal((await api('/auth/me', { token })).status, 429);
+  await pool.query('DELETE FROM api_rate_limits');
+  // Fuerza bruta contra una cuenta: se frena aunque cambie la IP.
+  await saturar(clave('login', 'documento:10002'));
+  const bloqueada = await api('/auth/login', {
+    method: 'POST',
+    body: { documento: '10002', contrasena: password },
+  });
+  assert.equal(bloqueada.status, 429);
+  assert.equal(
+    (await api('/auth/login', { method: 'POST', body: { documento: '10001', contrasena: password } })).status,
+    200,
+  );
+  // Los contadores siguen existiendo (con cupo libre) para la prueba siguiente.
+  await pool.query('UPDATE api_rate_limits SET hits=0');
+});
 test('límite de intentos no depende del proceso ASGI', async () => {
   await pool.query('UPDATE api_rate_limits SET hits=1000 WHERE key IS NOT NULL');
   assert.equal(

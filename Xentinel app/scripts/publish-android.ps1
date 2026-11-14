@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [Parameter(Mandatory)][string]$ConfigFile,
+  [string]$ConfigFile = (Join-Path $PSScriptRoot '../config/production.json'),
   [Parameter(Mandatory)][string]$WebPublic,
   [string]$Flutter = 'flutter',
   [string]$AndroidSdk = $env:ANDROID_HOME
@@ -12,7 +12,7 @@ $destination = (Resolve-Path -LiteralPath $WebPublic).Path
 if ((Split-Path $destination -Leaf) -ne 'public') { throw 'WebPublic debe ser la carpeta public del FrontEnd.' }
 $config = Get-Content -LiteralPath $configuration -Raw | ConvertFrom-Json
 $api = [uri]$config.API_BASE_URL
-if ($api.Scheme -ne 'https' -or $api.Host -match '(^|\.)(example\.(com|test)|localhost)$' -or $api.UserInfo -or $api.Query -or $api.Fragment -or $config.ALLOW_INSECURE_HTTP -eq $true) {
+if ($api.Scheme -ne 'https' -or $api.Host -match '(^|\.)(example\.(com|test)|localhost)$' -or $api.Host -match 'midominio' -or $api.UserInfo -or $api.Query -or $api.Fragment -or $config.ALLOW_INSECURE_HTTP -eq $true) {
   throw 'Configura una API HTTPS real de producción sin credenciales, consulta ni fragmento.'
 }
 if (!(Test-Path -LiteralPath (Join-Path $project 'android/key.properties'))) { throw 'Falta la firma de producción en android/key.properties.' }
@@ -22,9 +22,11 @@ $buildTools = Get-ChildItem -LiteralPath (Join-Path $AndroidSdk 'build-tools') -
 if (!$buildTools) { throw 'No hay Android build-tools instalados.' }
 Push-Location $project
 try {
-  & $Flutter build apk --release "--dart-define-from-file=$configuration"
+  # Ofuscado y sin símbolos de depuración en el APK; los símbolos quedan en build/symbols
+  # (no se publican) para descifrar trazas de errores de esta versión.
+  & $Flutter build apk --release --split-per-abi --target-platform android-arm64 -P force-version-code-ignoring-abi=true --obfuscate --split-debug-info=build/symbols "--dart-define-from-file=$configuration"
   if ($LASTEXITCODE -ne 0) { throw 'Falló la compilación release.' }
-  $apk = Join-Path $project 'build/app/outputs/flutter-apk/app-release.apk'
+  $apk = Join-Path $project 'build/app/outputs/flutter-apk/app-arm64-v8a-release.apk'
   $badging = (& (Join-Path $buildTools.FullName 'aapt.exe') dump badging $apk) -join "`n"
   if ($LASTEXITCODE -ne 0 -or $badging -match 'application-debuggable') { throw 'APK inválido o depurable.' }
   if ($badging -notmatch "package: name='co.edu.sena.xentinel' versionCode='(\d+)' versionName='(\d+\.\d+\.\d+)'") { throw 'El APK no coincide con Xentinel o su versión no es válida.' }

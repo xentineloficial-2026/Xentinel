@@ -70,11 +70,15 @@ function ControlAccesos() {
     }
   };
   /* leerCodigo: operación local que atiende el evento o transforma la información. */
-  const leerCodigo = (identificador) => {
+  const leerCodigo = ({ id_usuarios: identificador, codigo_qr }) => {
     cambiarFormulario((actual) => ({
       ...actual,
       id_usuarios: String(identificador),
     }));
+    // Carnet firmado de la app: el servidor verifica firma y vigencia con la hora de lectura.
+    codigoLeido.current = codigo_qr
+      ? { codigo_qr, escaneado_en: new Date().toISOString() }
+      : null;
     cambiarMetodoRegistro('QR');
     cambiarPersona(null);
     cambiarIdentidadConfirmada(false);
@@ -86,6 +90,8 @@ function ControlAccesos() {
   };
   /* operacion: referencia estable entre renderizados, sin disparar una actualización visual. */
   const operacion = useReferencia(null);
+  /* codigoLeido: carnet firmado leído con la cámara, enviado tal cual al servidor. */
+  const codigoLeido = useReferencia(null);
   /* ocupado: referencia estable entre renderizados, sin disparar una actualización visual. */
   const ocupado = useReferencia(false);
   /* cambiar: operación local que atiende el evento o transforma la información. */
@@ -98,6 +104,7 @@ function ControlAccesos() {
     if (campo === 'id_usuarios') {
       cambiarMetodoRegistro('Manual');
       cambiarPersona(null);
+      codigoLeido.current = null;
     }
     cambiarIdentidadConfirmada(false);
     cambiarRetroalimentacion({});
@@ -148,6 +155,7 @@ function ControlAccesos() {
           tipo: formulario.tipo,
           metodo: metodoRegistro,
           request_id: operacion.current,
+          ...(metodoRegistro === 'QR' && codigoLeido.current),
         },
       });
       cambiarRetroalimentacion(

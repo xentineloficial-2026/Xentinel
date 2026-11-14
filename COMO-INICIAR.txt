@@ -99,14 +99,13 @@ Opcion B - Base vacia:
   cd "Xentinel app"
   flutter pub get
 
-  Con el emulador de Android abierto (el backend en el mismo PC):
-     flutter run --dart-define-from-file=config/development.example.json
+  La app usa la API publicada en internet (https://xentinel-api.onrender.com):
+  funciona en el emulador o en cualquier celular, con datos o con cualquier
+  Wi-Fi, sin escribir IP ni abrir puertos:
+     flutter run
 
-  En un celular fisico conectado a la misma red Wi-Fi:
-     1. Mira la IP del PC con:  ipconfig   (ej. 192.168.1.40)
-     2. En la pantalla de inicio de la app, toca "Configurar servidor"
-        y escribe:  192.168.1.40:8000
-     3. Permite el puerto 8000 en el firewall de Windows si no conecta.
+  Solo para probar contra el backend de este PC (desarrollo):
+     flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8000/api/v1 --dart-define=ALLOW_INSECURE_HTTP=true
 
   Pruebas de la app:   flutter test
 
@@ -127,8 +126,8 @@ PROBLEMAS COMUNES
 - Errores de certificado en Git o npm con antivirus (Avast, etc.):
   el antivirus inspecciona HTTPS. Para Git, dentro del proyecto:
      git config http.sslBackend schannel
-- La app no conecta: celular y PC en la misma Wi-Fi, backend encendido
-  y puerto 8000 permitido en el firewall.
+- La app tarda en conectar la primera vez: el plan gratis de Render
+  duerme la API tras 15 minutos sin uso; despierta en cerca de un minuto.
 
 ---------------------------------------------------------------------
 SEGURIDAD
@@ -137,5 +136,5 @@ Este ZIP incluye la carpeta xentinel-privado, los .env y Xentinel.sql,
 con claves y datos personales reales. Compartelo solo con tu grupo y
 no lo subas a internet ni a repositorios publicos.
 
-Guia para publicar en internet (Render, Neon, Brevo): DESPLIEGUE.md
+Guia de la publicacion en internet (Render y Supabase): DESPLIEGUE.md
 =====================================================================

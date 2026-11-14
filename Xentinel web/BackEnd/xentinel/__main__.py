@@ -92,6 +92,12 @@ def ejecutar():
             reload=opciones.recargar,
             timeout_graceful_shutdown=15,
             server_header=False,
+            # Canal /api/v1/tiempo-real: mensajes pequeños y detección de conexiones caídas
+            # (redes móviles que cambian de antena o de Wi-Fi a datos).
+            ws="websockets-sansio",
+            ws_max_size=64 * 1024,
+            ws_ping_interval=20,
+            ws_ping_timeout=20,
         )
         return
 

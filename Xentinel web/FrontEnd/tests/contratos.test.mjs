@@ -19,6 +19,7 @@ import {
 import {
   crearContenidoQr,
   interpretarContenidoQr,
+  leerCodigoAcceso,
 } from '../src/compartido/utilidades/codigoQr.js';
 import {
   normalizarDia,
@@ -188,6 +189,24 @@ probar('QR contiene solo ID, sistema y versión', () => {
     id_usuarios: 27,
   });
   comprobar.equal(interpretarContenidoQr(contenido), 27);
+});
+probar('lector web acepta el carnet de la app, firmado o heredado', () => {
+  const firmado = 'XN2:51:119000000:34LXQRURWYGRTV45BUWW';
+  comprobar.deepEqual(leerCodigoAcceso(` ${firmado} `), {
+    id_usuarios: 51,
+    codigo_qr: firmado,
+  });
+  comprobar.deepEqual(leerCodigoAcceso('XENTINEL:27:1790000000000'), {
+    id_usuarios: 27,
+  });
+  comprobar.equal(interpretarContenidoQr(firmado), 51);
+  for (const contenido of [
+    'XN2:51:1:minusculas234567abcdef',
+    'XN2:0:1:34LXQRURWYGRTV45BUWW',
+    'XN2:9999999999:1:34LXQRURWYGRTV45BUWW',
+    'XENTINEL:27',
+  ])
+    comprobar.throws(() => leerCodigoAcceso(contenido));
 });
 probar('lector rechaza QR ajeno, IDs inválidos y texto excesivo', () => {
   for (const contenido of [

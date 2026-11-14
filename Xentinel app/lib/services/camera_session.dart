@@ -42,12 +42,25 @@ abstract interface class CameraDriver {
   Future<void> dispose();
 }
 
+/// Cámara configurada para leer el carnet en la pantalla de otro teléfono.
+///
+/// - 1280×720 en Android: suficiente detalle para un QR de 29×29 módulos a 20–40 cm
+///   y análisis rápido incluso en teléfonos modestos (1080p satura el decodificador
+///   y aumenta la latencia; 640×480 pierde módulos con moiré).
+/// - Zoom automático de ML Kit (Android): si el código se ve pequeño, acerca la
+///   imagen; así la persona puede alejar el teléfono más allá de la distancia
+///   mínima de enfoque, que es la causa principal de lecturas fallidas
+///   de pantalla a pantalla.
+/// - Solo formato QR y 250 ms entre resultados repetidos: menos trabajo por cuadro.
 class MobileScannerDriver implements CameraDriver {
   final controller = MobileScannerController(
     autoStart: false,
     formats: const [BarcodeFormat.qrCode],
     detectionSpeed: DetectionSpeed.normal,
-    detectionTimeoutMs: 500,
+    detectionTimeoutMs: 250,
+    cameraResolution: const Size(1280, 720),
+    autoZoom: true,
+    facing: CameraFacing.back,
   );
 
   @override

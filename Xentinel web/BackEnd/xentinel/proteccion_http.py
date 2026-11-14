@@ -5,6 +5,7 @@ import re
 from hashlib import sha256
 from uuid import uuid4
 
+import jwt
 from fastapi.exceptions import RequestValidationError
 from psycopg import Error as ErrorPostgres
 from starlette.concurrency import run_in_threadpool
@@ -14,6 +15,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse, Response
 
 from .http import ErrorAPI
+from .seguridad import AUDIENCIA, EMISOR
 
 LOG = logging.getLogger(__name__)
 MAXIMO_CUERPO = 64 * 1024
@@ -142,6 +144,45 @@ def contar_peticion(db, ip, grupo, maximo, segundos):
         )
 
 
+def clave_limite(cabeceras, config, ip):
+    """Persona autenticada (firma del JWT válida) o, sin sesión, la IP.
+
+    Solo se comprueba la firma, sin consultar la base: basta para que un cliente no
+    pueda gastar el cupo de otra persona. La autorización completa ocurre después.
+    """
+    cabecera = cabeceras.get("authorization", "")
+    if cabecera[:7].lower() == "bearer " and len(cabecera) <= 4096:
+        try:
+            datos = jwt.decode(
+                cabecera[7:].strip(),
+                config.JWT_SECRET,
+                algorithms=["HS256"],
+                issuer=EMISOR,
+                audience=AUDIENCIA,
+                options={"verify_exp": False},
+            )
+        except jwt.InvalidTokenError:
+            return ip
+        sujeto = datos.get("sub")
+        if isinstance(sujeto, str) and sujeto.isdigit() and len(sujeto) <= 10:
+            return f"usuario:{sujeto}"
+    return ip
+
+
+def ip_cliente(scope, cabeceras, saltos):
+    """IP del cliente; con proxies de confianza toma la entrada que agregó el último proxy."""
+    ip = scope.get("client", ("local", 0)) or ("local", 0)
+    if not saltos:
+        return ip[0]
+    cadena = [
+        direccion.strip()
+        for direccion in cabeceras.get("x-forwarded-for", "").split(",")
+        if direccion.strip()
+    ]
+    cadena.append(ip[0])
+    return cadena[max(0, len(cadena) - 1 - saltos)]
+
+
 class CorsXentinel(CORSMiddleware):
     def preflight_response(self, request_headers):
         respuesta = super().preflight_response(request_headers)
@@ -225,9 +266,23 @@ class ProteccionHTTP:
             ):
                 db = scope["app"].state.base
                 ip = self.ip_cliente(scope, cabeceras)
-                await run_in_threadpool(contar_peticion, db, ip, "api", 600, 60)
+                await run_in_threadpool(
+                    contar_peticion,
+                    db,
+                    clave_limite(cabeceras, self.config, ip),
+                    "api",
+                    self.config.RATE_LIMIT_API_PER_MINUTE,
+                    60,
+                )
                 if ruta in RUTAS_AUTH:
-                    await run_in_threadpool(contar_peticion, db, ip, "auth", 20, 900)
+                    await run_in_threadpool(
+                        contar_peticion,
+                        db,
+                        ip,
+                        "auth",
+                        self.config.RATE_LIMIT_AUTH_PER_15MIN,
+                        900,
+                    )
                 if ruta in RUTAS_RESET:
                     await run_in_threadpool(contar_peticion, db, ip, "reset", 10, 900)
                 if ruta == "/api/v1/alertas/sos" and metodo == "POST":
@@ -246,17 +301,7 @@ class ProteccionHTTP:
             await error_interno(scope, error)(scope, receive, enviar)
 
     def ip_cliente(self, scope, cabeceras):
-        ip = scope.get("client", ("local", 0)) or ("local", 0)
-        saltos = self.config.TRUST_PROXY_HOPS
-        if not saltos:
-            return ip[0]
-        cadena = [
-            direccion.strip()
-            for direccion in cabeceras.get("x-forwarded-for", "").split(",")
-            if direccion.strip()
-        ]
-        cadena.append(ip[0])
-        return cadena[max(0, len(cadena) - 1 - saltos)]
+        return ip_cliente(scope, cabeceras, self.config.TRUST_PROXY_HOPS)
 
     @staticmethod
     async def limitar_cuerpo(cabeceras, receive, maximo=MAXIMO_CUERPO):

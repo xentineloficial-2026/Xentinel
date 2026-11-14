@@ -79,6 +79,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       final user = ref.read(currentUserProvider);
       final location = state.matchedLocation;
 
+      // El carnet sin conexión es accesible con o sin sesión (tras biometría).
+      if (location == '/carnet-offline') return null;
       final publicRoute =
           location == '/login' || location == '/forgot-password';
       if (user == null) return publicRoute ? null : '/login';
@@ -98,6 +100,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/carnet',
         pageBuilder: (_, state) => _page(state, const CarnetScreen()),
+      ),
+      GoRoute(
+        path: '/carnet-offline',
+        pageBuilder: (_, state) =>
+            _page(state, const CarnetScreen(offline: true)),
       ),
       GoRoute(
         path: '/scanner',

@@ -1,4 +1,4 @@
-# Despliegue gratuito para el piloto en Render: API y web. La base de datos vive en Neon.
+# Despliegue gratuito del piloto en Render: API y web. La base de datos vive en Supabase.
 # Guía completa en DESPLIEGUE.md. Los valores con sync: false se escriben en el panel de
 # Render y nunca se guardan aquí. Las rutas se escriben desde la raíz del repositorio.
 services:
@@ -8,10 +8,11 @@ services:
     # Plan gratis: se duerme tras 15 minutos sin uso y tarda cerca de un minuto en despertar.
     # Antes de atender emergencias reales, cambiar a un plan de pago que no se duerma.
     plan: free
+    # Misma región que la base de Supabase (us-east-1).
     region: virginia
     dockerfilePath: ./Xentinel web/BackEnd/Dockerfile
     dockerContext: ./Xentinel web/BackEnd
-    # /health no consulta la base, para no gastar el cómputo mensual de Neon.
+    # /health no consulta la base: Render comprueba el proceso sin gastar conexiones.
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
@@ -24,16 +25,26 @@ services:
         value: America/Bogota
       - key: JWT_TTL_SECONDS
         value: "3600"
-      # El plan gratis bloquea los puertos 465 y 587; el relé de Brevo también atiende el 2525.
-      - key: SMTP_HOST
-        value: smtp-relay.brevo.com
+      # El pooler de Supabase en modo sesión admite 15 conexiones en el plan gratis.
+      - key: DB_POOL_MAX
+        value: "8"
+      # Toda la sede sale por una sola IP pública: el límite de login por IP se eleva y el
+      # de cada cuenta (RATE_LIMIT_LOGIN_PER_ACCOUNT) sigue frenando la fuerza bruta.
+      - key: RATE_LIMIT_AUTH_PER_15MIN
+        value: "300"
+      # Correo opcional: sin SMTP_HOST la recuperación de contraseña responde 503. El plan
+      # gratis bloquea los puertos 25, 465 y 587; el relé de Brevo también atiende el 2525.
       - key: SMTP_PORT
         value: "2525"
+      - key: SMTP_HOST
+        sync: false
       - key: DATABASE_URL
         sync: false
       - key: JWT_SECRET
         sync: false
       - key: MAIL_ENCRYPTION_KEY
+        sync: false
+      - key: QR_SECRET
         sync: false
       - key: WEB_ORIGINS
         sync: false

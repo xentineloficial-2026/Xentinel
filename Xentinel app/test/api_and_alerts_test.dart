@@ -284,6 +284,16 @@ void main() {
     },
   );
 
+  test(
+    'default build targets the HTTPS production API without a server dialog',
+    () {
+      expect(ApiConfig.compiledBaseUrl, ApiConfig.productionBaseUrl);
+      expect(Uri.parse(ApiConfig.productionBaseUrl).scheme, 'https');
+      expect(ApiConfig.allowServerOverride, isFalse);
+      expect(ApiConfig.realtimeEndpoint().toString(), startsWith('wss://'));
+    },
+  );
+
   test('server address accepts the short forms typed in the app', () {
     expect(
       ApiConfig.normalizeServer(' 192.168.1.40:8000/ '),

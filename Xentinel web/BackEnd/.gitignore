@@ -7,3 +7,5 @@ coverage/
 __pycache__/
 .venv/
 .ruff_cache/
+static/fotos/
+static/horarios/

@@ -10,6 +10,21 @@ class ServerEvent {
   final String? id;
 }
 
+/// Transporte de eventos en tiempo real: WebSocket (preferido) o SSE (respaldo).
+/// Ambos comparten cursor y formato, así el monitor puede cambiar de uno a otro
+/// sin perder ni repetir cambios.
+abstract interface class EventConnection {
+  /// Nombre para diagnóstico y para la interfaz ("WebSocket", "SSE").
+  String get transport;
+
+  Stream<ServerEvent> connect(Uri uri, String token, String? cursor);
+
+  /// Entrega un token renovado sin reconectar (sin efecto en SSE).
+  void updateToken(String token);
+
+  Future<void> close();
+}
+
 /// UTF-8 and line splitting are streaming: a network chunk is not an event.
 Stream<ServerEvent> decodeServerEvents(Stream<List<int>> bytes) async* {
   var type = 'message';
@@ -49,9 +64,12 @@ Stream<ServerEvent> decodeServerEvents(Stream<List<int>> bytes) async* {
   }
 }
 
-class AlertEventConnection {
+/// Respaldo SSE (`GET /eventos`) para redes o proxies que bloquean WebSocket.
+class AlertEventConnection implements EventConnection {
   AlertEventConnection({http.Client? client})
     : _client = client ?? http.Client();
+  @override
+  String get transport => 'SSE';
   final http.Client _client;
   final _abort = Completer<void>();
   late final _output = StreamController<ServerEvent>(onCancel: close);
@@ -61,6 +79,10 @@ class AlertEventConnection {
   bool _headersReceived = false;
   bool _closed = false;
 
+  @override
+  void updateToken(String token) {}
+
+  @override
   Stream<ServerEvent> connect(Uri uri, String token, String? cursor) {
     if (_opening != null || _closed) {
       throw StateError('Connection already used');
@@ -120,6 +142,7 @@ class AlertEventConnection {
     }
   }
 
+  @override
   Future<void> close() => _closing ??= _close();
 
   Future<void> _close() async {

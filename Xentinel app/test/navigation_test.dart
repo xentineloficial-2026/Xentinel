@@ -18,6 +18,34 @@ import 'package:xentinel/services/camera_session.dart';
 import 'package:xentinel/screens/carnet_screen.dart';
 import 'package:xentinel/screens/alerts_screen.dart';
 import 'package:xentinel/screens/scanner_screen.dart';
+import 'package:xentinel/services/access_outbox.dart';
+import 'package:xentinel/services/biometric_service.dart';
+import 'package:xentinel/services/credential_store.dart';
+import 'package:xentinel/services/network_status.dart';
+import 'package:xentinel/services/screen_brightness_service.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+
+import 'support/fakes.dart';
+
+class ApprovingBiometrics extends BiometricService {
+  int calls = 0;
+  @override
+  Future<bool> authenticate() async {
+    calls++;
+    return true;
+  }
+}
+
+QrCredential credentialFor7() => QrCredential(
+  userId: 7,
+  name: 'María Rodríguez',
+  documentId: '1007',
+  role: UserRole.aprendiz,
+  status: AccessStatus.permitido,
+  key: Uint8List.fromList(List.filled(32, 5)),
+  stepSeconds: 15,
+  issuedAt: DateTime.now(),
+);
 
 class TestPermissions implements CameraPermissions {
   PermissionStatus status = PermissionStatus.denied;
@@ -74,6 +102,9 @@ void main() {
   late TestPermissions permissions;
   late TestCameraPlatform platform;
   late MobileScannerPlatform originalPlatform;
+  late FakeBrightness brightness;
+  late ApprovingBiometrics biometrics;
+  late FakeConnectivity connectivity;
   bool disposed = false;
   final requests = <http.Request>[];
 
@@ -82,6 +113,9 @@ void main() {
     requests.clear();
     session = SessionStore();
     permissions = TestPermissions();
+    brightness = FakeBrightness();
+    biometrics = ApprovingBiometrics();
+    connectivity = FakeConnectivity();
     originalPlatform = MobileScannerPlatform.instance;
     platform = TestCameraPlatform();
     MobileScannerPlatform.instance = platform;
@@ -106,6 +140,11 @@ void main() {
         sessionProvider.overrideWith((_) => session),
         apiClientProvider.overrideWithValue(api),
         cameraPermissionsProvider.overrideWithValue(permissions),
+        connectivitySourceProvider.overrideWithValue(connectivity),
+        secureStoreProvider.overrideWithValue(MemorySecureStore()),
+        outboxPersistenceProvider.overrideWithValue(MemoryOutboxPersistence()),
+        brightnessControlProvider.overrideWithValue(brightness),
+        biometricServiceProvider.overrideWithValue(biometrics),
         alertsProvider.overrideWith((ref) {
           ref.watch(sessionProvider.select((session) => session.token));
           return AlertsMonitor(
@@ -230,6 +269,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(router.routeInformationProvider.value.uri.path, '/login');
       expect(requests.any((r) => r.url.path.endsWith('/auth/logout')), isTrue);
+      // El servidor revoca el carnet al cerrar sesión: no queda guardado.
+      expect(container.read(credentialStoreProvider).current, isNull);
       await unmount(tester);
     },
   );
@@ -268,6 +309,82 @@ void main() {
   );
 
   testWidgets(
+    'signed carnet shows a large Q-level code at full brightness and restores it',
+    (tester) async {
+      signIn();
+      await mount(tester);
+      await container.read(credentialStoreProvider).save(credentialFor7());
+      final router = container.read(routerProvider);
+      router.push('/carnet');
+      await tester.pumpAndSettle();
+      expect(brightness.maximized, 1);
+      final view = tester.widget<QrImageView>(find.byType(QrImageView));
+      expect(view.gapless, isTrue);
+      expect(view.backgroundColor, Colors.white);
+      expect(tester.getSize(find.byType(QrImageView)).width, greaterThan(250));
+      expect(find.textContaining('Carnet firmado'), findsOneWidget);
+      router.pop();
+      await tester.pumpAndSettle();
+      expect(brightness.restored, 1);
+      await unmount(tester);
+    },
+  );
+
+  testWidgets(
+    'saved carnet opens from login without session or network after biometrics',
+    (tester) async {
+      await mount(tester);
+      expect(find.text('Mostrar mi carnet sin conexión'), findsNothing);
+      await container.read(credentialStoreProvider).save(credentialFor7());
+      connectivity.set(false);
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Mostrar mi carnet sin conexión'));
+      await tester.tap(find.text('Mostrar mi carnet sin conexión'));
+      await tester.pumpAndSettle();
+      expect(biometrics.calls, 1);
+      expect(find.byType(CarnetScreen), findsOneWidget);
+      expect(find.text('María Rodríguez'), findsOneWidget);
+      expect(find.text('Doc. 1007'), findsOneWidget);
+      expect(find.textContaining('Sin conexión'), findsOneWidget);
+      expect(find.byType(QrImageView), findsOneWidget);
+      expect(requests, isEmpty, reason: 'el carnet no necesita servidor');
+      await unmount(tester);
+    },
+  );
+
+  testWidgets(
+    'scanner shows the offline state and the pending queue to the guard',
+    (tester) async {
+      signIn();
+      permissions.status = PermissionStatus.granted;
+      await mount(tester);
+      await container
+          .read(accessOutboxProvider)
+          .add(
+            PendingAccess(
+              requestId: '3a1e7c4a-1111-4111-8111-111111111111',
+              operatorId: '7',
+              userId: 51,
+              type: 'ENTRADA',
+              scannedAt: DateTime.now(),
+            ),
+          );
+      connectivity.set(false);
+      container.read(routerProvider).push('/scanner');
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('Sin conexión: los accesos se guardan'),
+        findsOneWidget,
+      );
+      await tester.tap(find.byTooltip('Registros sin conexión'));
+      await tester.pumpAndSettle();
+      expect(find.text('ID 51 · ENTRADA'), findsOneWidget);
+      expect(find.textContaining('al recuperar la conexión'), findsOneWidget);
+      await unmount(tester);
+    },
+  );
+
+  testWidgets(
     'small phone and enlarged text keep every screen free of overflow',
     (tester) async {
       tester.view.physicalSize = const Size(320, 568);
@@ -285,7 +402,15 @@ void main() {
       }
       signIn();
       await tester.pumpAndSettle();
-      for (final route in ['/home', '/carnet', '/alerts', '/scanner']) {
+      await container.read(credentialStoreProvider).save(credentialFor7());
+      permissions.status = PermissionStatus.granted;
+      for (final route in [
+        '/home',
+        '/carnet',
+        '/carnet-offline',
+        '/alerts',
+        '/scanner',
+      ]) {
         router.go(route);
         // A first-query progress indicator may animate while route callbacks run.
         for (var frame = 0; frame < 10; frame++) {

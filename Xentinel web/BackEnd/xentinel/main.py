@@ -1,6 +1,7 @@
 """Aplicación ASGI, ciclo de vida y montaje de los módulos HTTP de Xentinel."""
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -14,10 +15,16 @@ from .configuracion import RAIZ, cargar_configuracion
 from .correo import conectar_smtp, mantener, procesar_correo
 from .proteccion_http import MANEJADORES, ProteccionHTTP
 
+LOG = logging.getLogger(__name__)
+
 
 def verificar_smtp(config):
-    with conectar_smtp(config):
-        pass
+    # Un SMTP inalcanzable no debe tumbar la API: los correos quedan en cola y se reintentan.
+    try:
+        with conectar_smtp(config):
+            pass
+    except OSError as error:
+        LOG.error("SMTP no disponible (%s); los correos quedan en cola", error)
 
 
 def crear_aplicacion(configuracion=None):
@@ -25,7 +32,7 @@ def crear_aplicacion(configuracion=None):
 
     @asynccontextmanager
     async def ciclo_de_vida(app):
-        base = BaseDatos(config.DATABASE_URL)
+        base = BaseDatos(config.DATABASE_URL, config.DB_POOL_MAX)
         tareas = []
         try:
             await run_in_threadpool(base.pool.open, wait=True)
@@ -36,6 +43,10 @@ def crear_aplicacion(configuracion=None):
                 await run_in_threadpool(verificar_smtp, config)
                 tareas.append(
                     asyncio.create_task(mantener(2, procesar_correo, base, config))
+                )
+            elif config.NODE_ENV == "production":
+                LOG.warning(
+                    "SMTP sin configurar: la recuperación de contraseña responde 503"
                 )
             tareas.append(
                 asyncio.create_task(

@@ -295,4 +295,47 @@ CREATE INDEX IF NOT EXISTS horarios_ficha_orden ON horarios(id_ficha, id_horario
 
 INSERT INTO schema_migrations(version,checksum) VALUES('003_programas_admin','b9d532e467db2da57b03cdfd1ea78ff977293701e5769b88340e7e23b731e19a');
 
+-- 004_perfil_asistencia
+-- Estados de asistencia unificados, edición manual con autoría y fotos de perfil.
+
+-- Un solo vocabulario para la base, la web y los reportes.
+UPDATE asistencia SET estado = 'Retrasado'
+WHERE estado ILIKE '%tard%' OR estado ILIKE '%retra%';
+UPDATE asistencia SET estado = 'Presente'
+WHERE estado NOT IN ('Retrasado', 'Sin registro');
+
+-- Quién cambió el estado a mano y cuándo, para atender reclamos.
+ALTER TABLE asistencia
+  ADD COLUMN IF NOT EXISTS modificado_por integer REFERENCES usuarios(id_usuarios) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS modificado_en timestamptz;
+
+-- La foto vive en la base: no se pierde al reiniciar el servidor.
+CREATE TABLE IF NOT EXISTS usuario_foto (
+  id_usuarios integer PRIMARY KEY REFERENCES usuarios(id_usuarios) ON DELETE CASCADE,
+  contenido bytea NOT NULL,
+  tipo varchar(20) NOT NULL CHECK (tipo IN ('image/jpeg', 'image/png', 'image/gif')),
+  actualizado_en timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT usuario_foto_tamano CHECK (octet_length(contenido) <= 3145728)
+);
+
+INSERT INTO schema_migrations(version,checksum) VALUES('004_perfil_asistencia','2dc2e8e3e236123b330e34fa2f8ee7e8e1391e16a503b3d7bc4ba433ccbc1aab');
+
+-- 005_rls_correo_opcional
+-- Las bases creadas desde el volcado anterior exigían correo y asignaban el rol 1 por
+-- omisión; el esquema actual admite el correo vacío y exige indicar el rol.
+ALTER TABLE usuarios ALTER COLUMN correo DROP NOT NULL;
+ALTER TABLE usuarios ALTER COLUMN id_rol DROP DEFAULT;
+-- La API es el único cliente de la base. Sin políticas, RLS niega el acceso directo de
+-- cualquier otro rol (p. ej. la API de datos de Supabase); el dueño de las tablas no cambia.
+DO $$
+DECLARE tabla record;
+BEGIN
+ FOR tabla IN SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+  WHERE n.nspname=current_schema() AND c.relkind IN ('r','p') AND pg_get_userbyid(c.relowner)=current_user
+ LOOP
+  EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tabla.relname);
+ END LOOP;
+END $$;
+
+INSERT INTO schema_migrations(version,checksum) VALUES('005_rls_correo_opcional','376cbeffd20c63e480f6c846999c7d5d61de7c2e41677f0777d780657c119838');
 COMMIT;

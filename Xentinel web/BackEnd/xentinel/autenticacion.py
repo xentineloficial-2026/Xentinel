@@ -3,14 +3,17 @@
 from datetime import date
 from hashlib import sha256
 from secrets import token_hex
+from time import time
 from typing import Annotated, Literal
 from urllib.parse import urlencode, urlsplit
 
 from fastapi import APIRouter, Request, Response
 from pydantic import AfterValidator, StringConstraints
 
+from . import credenciales
 from .correo import cifrar_correo
 from .http import Base, Entrada, ErrorAPI, responder, texto
+from .proteccion_http import contar_peticion
 from .seguridad import (
     COLUMNAS_PERSONA,
     SesionActual,
@@ -124,6 +127,16 @@ def registrar(datos: Registro, db: Base, solicitud: Request):
 @legado.post("/login")
 @rutas.post("/auth/login")
 def iniciar_sesion(datos: Login, db: Base, solicitud: Request):
+    config = solicitud.app.state.configuracion
+    # Por cuenta, además del límite por IP: frena la fuerza bruta contra un documento
+    # aunque llegue desde muchas IP, y permite elevar el de IP para sedes con NAT.
+    contar_peticion(
+        db,
+        f"documento:{datos.documento.lower()}",
+        "login",
+        config.RATE_LIMIT_LOGIN_PER_ACCOUNT,
+        900,
+    )
     usuario = db.fila(
         f"""SELECT {COLUMNAS_PERSONA},u.contrasena,u.auth_version,u.requiere_restablecimiento
         FROM usuarios u JOIN rol r USING(id_rol) WHERE numero_documento=%s""",
@@ -135,7 +148,6 @@ def iniciar_sesion(datos: Login, db: Base, solicitud: Request):
     )
     if not valida or not habilitado:
         raise ErrorAPI(401, "INVALID_CREDENTIALS", "Documento o contraseña incorrectos")
-    config = solicitud.app.state.configuracion
     publico = usuario_publico(usuario)
     resultado = {
         "access_token": crear_token(usuario, config),
@@ -152,6 +164,59 @@ def iniciar_sesion(datos: Login, db: Base, solicitud: Request):
 @rutas.get("/auth/me")
 def mi_perfil(sesion: SesionActual):
     return responder(usuario_publico(sesion.usuario))
+
+
+@rutas.post("/auth/renovar")
+def renovar_sesion(sesion: SesionActual, solicitud: Request):
+    """Emite un JWT nuevo antes de que venza el actual, sin pedir otra vez la contraseña.
+
+    La renovación conserva el instante del ingreso original (``auth_time``): al superar
+    ``SESSION_MAX_HOURS`` la persona debe autenticarse de nuevo. Cerrar sesión, cambiar la
+    contraseña o desactivar la cuenta revoca también los tokens renovados.
+    """
+    config = solicitud.app.state.configuracion
+    inicio = sesion.token.get("auth_time", sesion.token.get("iat"))
+    if (
+        type(inicio) is not int
+        or inicio > time() + 60
+        or time() - inicio > config.SESSION_MAX_HOURS * 3600
+    ):
+        raise ErrorAPI(
+            401,
+            "SESSION_MAX_AGE",
+            "La sesión alcanzó su duración máxima. Vuelve a ingresar.",
+        )
+    return responder(
+        {
+            "access_token": crear_token(sesion.usuario, config, inicio),
+            "token_type": "Bearer",
+            "expires_in": config.JWT_TTL_SECONDS,
+            "usuario": usuario_publico(sesion.usuario),
+        }
+    )
+
+
+@rutas.get("/auth/credencial-qr")
+def credencial_qr(sesion: SesionActual, solicitud: Request):
+    """Clave del carnet QR rotativo del titular, para generarlo incluso sin conexión.
+
+    Solo sirve para el carnet de esta persona y se revoca con ``auth_version``.
+    """
+    config = solicitud.app.state.configuracion
+    clave = credenciales.clave_usuario(
+        config, sesion.id, sesion.usuario["auth_version"]
+    )
+    return responder(
+        {
+            "version": 2,
+            "formato": credenciales.PREFIJO,
+            "id_usuarios": sesion.id,
+            "clave": credenciales.codificar_clave(clave),
+            "paso_segundos": credenciales.PASO_SEGUNDOS,
+            "ventana_pasos": credenciales.VENTANA_PASOS,
+            "servidor_ms": int(time() * 1000),
+        }
+    )
 
 
 @rutas.post("/auth/logout", status_code=204)

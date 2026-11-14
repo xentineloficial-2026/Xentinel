@@ -6,9 +6,10 @@ import 'package:local_auth/local_auth.dart';
 class BiometricService {
   final LocalAuthentication _auth = LocalAuthentication();
 
-  /// Devuelve `true` si el usuario se verificó.
-  /// Si el dispositivo no soporta biometría ni credenciales, devuelve `true`
-  /// (modo de pruebas/emulador). Cambia ese comportamiento si lo necesitas.
+  /// Devuelve `true` si el usuario se verificó con huella, rostro o el PIN/patrón
+  /// del teléfono. Un teléfono sin ningún bloqueo de pantalla no puede verificar a
+  /// nadie: se acepta, porque en el login la contraseña ya la validó el servidor y el
+  /// carnet sin conexión solo existe en el teléfono de su titular.
   Future<bool> authenticate() async {
     try {
       final supported = await _auth.isDeviceSupported();

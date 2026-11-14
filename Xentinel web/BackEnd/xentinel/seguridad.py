@@ -71,7 +71,8 @@ def activo(usuario):
     return usuario is not None and (usuario.get("estado") or "").lower() == "activo"
 
 
-def crear_token(usuario, configuracion):
+def crear_token(usuario, configuracion, inicio=None):
+    """JWT corto. ``auth_time`` conserva el ingreso original para limitar las renovaciones."""
     ahora = datetime.now(UTC)
     return jwt.encode(
         {
@@ -80,6 +81,7 @@ def crear_token(usuario, configuracion):
             "iss": EMISOR,
             "aud": AUDIENCIA,
             "iat": ahora,
+            "auth_time": int(inicio if inicio is not None else ahora.timestamp()),
             "exp": ahora + timedelta(seconds=configuracion.JWT_TTL_SECONDS),
         },
         configuracion.JWT_SECRET,
@@ -123,10 +125,19 @@ def autenticar(
     cabecera = solicitud.headers.get("Authorization", "")
     if not credencial or not re.fullmatch(r"Bearer \S+", cabecera, re.IGNORECASE):
         raise ErrorAPI(401, "UNAUTHORIZED", "Se requiere Authorization: Bearer token")
+    return sesion_desde_token(
+        solicitud.app.state.configuracion, db, credencial.credentials
+    )
+
+
+def sesion_desde_token(configuracion, db, credencial):
+    """Valida firma, vigencia, versión y estado; compartido por HTTP y WebSocket."""
+    if not isinstance(credencial, str) or not 0 < len(credencial) <= 4096:
+        raise ErrorAPI(401, "UNAUTHORIZED", "Se requiere un token de sesión")
     try:
         token = jwt.decode(
-            credencial.credentials,
-            solicitud.app.state.configuracion.JWT_SECRET,
+            credencial,
+            configuracion.JWT_SECRET,
             algorithms=["HS256"],
             issuer=EMISOR,
             audience=AUDIENCIA,
