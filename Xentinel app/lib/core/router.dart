@@ -11,6 +11,8 @@ import '../screens/scanner_screen.dart';
 import 'route_observer.dart';
 import '../screens/alerts_screen.dart';
 import '../screens/forgot_password_screen.dart';
+import '../screens/seismic_alert_screen.dart';
+import '../services/seismic_alerts.dart';
 
 /// Solo ADMINISTRADOR y GUARDIA pueden usar el escáner.
 bool canScan(UserRole role) =>
@@ -79,8 +81,9 @@ final routerProvider = Provider<GoRouter>((ref) {
       final user = ref.read(currentUserProvider);
       final location = state.matchedLocation;
 
-      // El carnet sin conexión es accesible con o sin sesión (tras biometría).
-      if (location == '/carnet-offline') return null;
+      // El carnet sin conexión (tras biometría) y la alerta sísmica se abren con o
+      // sin sesión: la alerta llega aun con el teléfono bloqueado.
+      if (location == '/carnet-offline' || location == '/sismo') return null;
       final publicRoute =
           location == '/login' || location == '/forgot-password';
       if (user == null) return publicRoute ? null : '/login';
@@ -121,6 +124,13 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/forgot-password',
         pageBuilder: (_, state) => _page(state, const ForgotPasswordScreen()),
+      ),
+      GoRoute(
+        path: '/sismo',
+        pageBuilder: (_, state) => NoTransitionPage<void>(
+          key: state.pageKey,
+          child: SeismicAlertScreen(alert: state.extra as SeismicAlert?),
+        ),
       ),
     ],
   );

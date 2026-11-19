@@ -1,5 +1,6 @@
 """Configuración compartida con la instalación existente de Xentinel."""
 
+import json
 import os
 from pathlib import Path
 from typing import Literal
@@ -22,7 +23,8 @@ class Configuracion(BaseModel):
     JWT_SECRET: str = Field(min_length=64, repr=False)
     MAIL_ENCRYPTION_KEY: str = Field(pattern=r"^[a-fA-F0-9]{64}$", repr=False)
     JWT_TTL_SECONDS: int = Field(default=900, ge=60, le=3600)
-    RESET_TTL_MINUTES: int = Field(default=20, ge=5, le=60)
+    # Vigencia del código de recuperación de 6 dígitos.
+    RESET_TTL_MINUTES: int = Field(default=15, ge=5, le=60)
     # Zona de la sede: la fecha y la hora de asistencia son locales, no UTC.
     ZONA_HORARIA: str = "America/Bogota"
     WEB_ORIGINS: str
@@ -34,6 +36,13 @@ class Configuracion(BaseModel):
     SMTP_USER: str = ""
     SMTP_PASS: str = Field(default="", repr=False)
     SMTP_FROM: str = "Xentinel <no-reply@example.com>"
+    # Gmail API por HTTPS (alternativa a SMTP donde los puertos SMTP están bloqueados,
+    # como el plan gratis de Render). Con las tres variables definidas reemplaza a SMTP.
+    GMAIL_CLIENT_ID: str = ""
+    GMAIL_CLIENT_SECRET: str = Field(default="", repr=False)
+    GMAIL_REFRESH_TOKEN: str = Field(default="", repr=False)
+    GMAIL_TOKEN_URL: str = "https://oauth2.googleapis.com/token"
+    GMAIL_API_URL: str = "https://gmail.googleapis.com"
     # Carnet QR rotativo firmado (XN2). Sin valor se deriva de JWT_SECRET con separación
     # de dominio; defínalo para rotar las credenciales QR sin cerrar las sesiones.
     QR_SECRET: str = Field(default="", repr=False)
@@ -47,12 +56,49 @@ class Configuracion(BaseModel):
     RATE_LIMIT_API_PER_MINUTE: int = Field(default=600, ge=60, le=100000)
     RATE_LIMIT_AUTH_PER_15MIN: int = Field(default=20, ge=5, le=100000)
     RATE_LIMIT_LOGIN_PER_ACCOUNT: int = Field(default=10, ge=3, le=1000)
+    # Monitor sísmico: EMSC por WebSocket en tiempo real y USGS como respaldo, con centro
+    # en la sede. Solo genera alertas dentro del radio y desde la magnitud mínima.
+    SEISMIC_ENABLED: Literal["true", "false"] = "false"
+    SEISMIC_LAT: float = Field(default=4.6097, ge=-90, le=90)
+    SEISMIC_LON: float = Field(default=-74.0817, ge=-180, le=180)
+    SEISMIC_RADIUS_KM: float = Field(default=500, gt=0, le=20000)
+    SEISMIC_MIN_MAGNITUDE: float = Field(default=4.0, ge=0, le=10)
+    SEISMIC_USGS_INTERVAL: int = Field(default=30, ge=10, le=3600)
+    # Ignora reportes de sismos más antiguos (por ejemplo, al despertar el servidor).
+    SEISMIC_MAX_AGE_MINUTES: int = Field(default=30, ge=1, le=1440)
+    # La alerta automática se cierra sola pasado este tiempo.
+    SEISMIC_ALERT_MINUTES: int = Field(default=30, ge=5, le=1440)
+    SEISMIC_EMSC_URL: str = "wss://www.seismicportal.eu/standing_order/websocket"
+    SEISMIC_USGS_URL: str = "https://earthquake.usgs.gov/fdsnws/event/1/query"
+    # Firebase Cloud Messaging: JSON de la cuenta de servicio, completo y en una línea.
+    FIREBASE_SERVICE_ACCOUNT: str = Field(default="", repr=False)
+    FCM_TOPIC: str = Field(
+        default="alertas_sismo", pattern=r"^[A-Za-z0-9_.~%-]{1,100}$"
+    )
+    FCM_API_URL: str = "https://fcm.googleapis.com"
+    FCM_IID_URL: str = "https://iid.googleapis.com"
 
     @property
     def origenes(self):
         return [
             origen.strip() for origen in self.WEB_ORIGINS.split(",") if origen.strip()
         ]
+
+    @property
+    def gmail(self):
+        return bool(self.GMAIL_REFRESH_TOKEN)
+
+    @property
+    def correo_configurado(self):
+        return bool(self.SMTP_HOST or self.gmail)
+
+    @property
+    def cuenta_firebase(self):
+        return (
+            json.loads(self.FIREBASE_SERVICE_ACCOUNT)
+            if self.FIREBASE_SERVICE_ACCOUNT
+            else None
+        )
 
     @model_validator(mode="after")
     def validar_urls(self):
@@ -72,6 +118,27 @@ class Configuracion(BaseModel):
             for o in self.origenes
         ):
             raise ValueError("WEB_ORIGINS debe contener orígenes explícitos sin rutas")
+        gmail = (
+            self.GMAIL_CLIENT_ID,
+            self.GMAIL_CLIENT_SECRET,
+            self.GMAIL_REFRESH_TOKEN,
+        )
+        if any(gmail) and not all(gmail):
+            raise ValueError(
+                "Gmail API requiere GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET y GMAIL_REFRESH_TOKEN"
+            )
+        if self.FIREBASE_SERVICE_ACCOUNT:
+            try:
+                cuenta = json.loads(self.FIREBASE_SERVICE_ACCOUNT)
+            except ValueError:
+                raise ValueError("FIREBASE_SERVICE_ACCOUNT debe ser JSON") from None
+            if not isinstance(cuenta, dict) or not all(
+                isinstance(cuenta.get(campo), str) and cuenta[campo]
+                for campo in ("project_id", "client_email", "private_key")
+            ):
+                raise ValueError(
+                    "FIREBASE_SERVICE_ACCOUNT debe ser la cuenta de servicio de Firebase"
+                )
         if self.QR_SECRET and len(self.QR_SECRET) < 32:
             raise ValueError("QR_SECRET debe tener al menos 32 caracteres")
         enlace = urlsplit(self.RESET_PASSWORD_URL)

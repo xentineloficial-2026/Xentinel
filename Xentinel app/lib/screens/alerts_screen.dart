@@ -4,6 +4,7 @@ import '../components/emergency_card.dart';
 import '../components/xentinel_brand.dart';
 import '../core/theme.dart';
 import '../providers/alerts_provider.dart';
+import '../services/seismic_alerts.dart';
 
 class AlertsScreen extends ConsumerWidget {
   const AlertsScreen({super.key});
@@ -53,6 +54,10 @@ class AlertsScreen extends ConsumerWidget {
               ],
             ),
             const SizedBox(height: 20),
+            if (SeismicAlerts.available) ...[
+              const _SeismicPermissions(),
+              const SizedBox(height: 20),
+            ],
             if (monitor.error != null) ...[
               Container(
                 padding: const EdgeInsets.all(16),
@@ -123,4 +128,75 @@ class AlertsScreen extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// Permisos opcionales para que la alerta sísmica encienda la pantalla y suene
+/// aunque el teléfono esté en No molestar.
+class _SeismicPermissions extends StatefulWidget {
+  const _SeismicPermissions();
+  @override
+  State<_SeismicPermissions> createState() => _SeismicPermissionsState();
+}
+
+class _SeismicPermissionsState extends State<_SeismicPermissions> {
+  bool? _dnd;
+
+  @override
+  void initState() {
+    super.initState();
+    SeismicAlerts.hasDndAccess().then((value) {
+      if (mounted) setState(() => _dnd = value);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: XentinelTheme.surface,
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: XentinelTheme.border),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Alertas sísmicas en este teléfono',
+          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'Recibes los sismos cercanos aunque Xentinel esté cerrado. Para que la alerta '
+          'encienda la pantalla y suene en No molestar, concede estos permisos.',
+          style: TextStyle(color: XentinelTheme.steel, height: 1.4),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            OutlinedButton.icon(
+              onPressed: SeismicAlerts.requestFullScreen,
+              icon: const Icon(Icons.fullscreen),
+              label: const Text('Pantalla completa'),
+            ),
+            OutlinedButton.icon(
+              onPressed: _dnd == true
+                  ? null
+                  : () async {
+                      final granted = await SeismicAlerts.requestDndAccess();
+                      if (mounted) setState(() => _dnd = granted);
+                    },
+              icon: Icon(
+                _dnd == true ? Icons.check : Icons.do_not_disturb_on_outlined,
+              ),
+              label: Text(
+                _dnd == true ? 'Suena en No molestar' : 'Sonar en No molestar',
+              ),
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
 }

@@ -16,6 +16,7 @@ import { useAutenticacion } from '../contextos/autenticacion.js';
 import { rolParaUsuario } from '../../configuracion/navegacion.js';
 import { formatearFecha } from '../utilidades/tablas.js';
 import { severidadDe } from '../ganchos/useInterrupcion.js';
+import { sonarSirena } from '../utilidades/sirena.js';
 
 const ETIQUETAS = {
   critica: 'Alerta crítica',
@@ -30,6 +31,8 @@ export function InterrupcionEmergencia({ alerta, alAtender, base }) {
   const [sos, cambiarSos] = useEstado({ estado: 'inactivo' });
   const severidad = severidadDe(alerta);
   const esSimulacro = /simulacro/i.test(alerta.tipo_alerta);
+  /* Sirena al aparecer el aviso; se detiene al atenderlo. */
+  useEfecto(() => sonarSirena(), []);
   useEfecto(() => {
     principal.current?.focus();
     const anterior = document.body.style.overflow;

@@ -1,8 +1,9 @@
 """Registro, inicio de sesión y recuperación de credenciales de uso único."""
 
+import hmac
 from datetime import date
 from hashlib import sha256
-from secrets import token_hex
+from secrets import randbelow
 from time import time
 from typing import Annotated, Literal
 from urllib.parse import urlencode, urlsplit
@@ -41,7 +42,11 @@ Correo = Annotated[
         pattern=r"^[A-Za-z0-9_'+-]+(?:\.[A-Za-z0-9_'+-]+)*@(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,}$",
     ),
 ]
-TokenRecuperacion = Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$")]
+CodigoRecuperacion = Annotated[
+    str, StringConstraints(strip_whitespace=True, pattern=r"^[0-9]{6}$")
+]
+MAXIMO_INTENTOS_CODIGO = 5
+SOLICITUDES_POR_CORREO = 3
 ClaveActual = Annotated[str, StringConstraints(min_length=1, max_length=200)]
 FechaNacimiento = Annotated[
     str,
@@ -83,7 +88,7 @@ class SolicitudRecuperacion(Entrada):
 
 
 class ValidacionRecuperacion(SolicitudRecuperacion):
-    token: TokenRecuperacion
+    codigo: CodigoRecuperacion
 
 
 class Restablecimiento(ValidacionRecuperacion):
@@ -228,13 +233,17 @@ def cerrar_sesion(db: Base, sesion: SesionActual):
     return Response(status_code=204)
 
 
-def hash_token(token):
-    return sha256(token.encode()).hexdigest()
+def hash_codigo(config, identificador, codigo):
+    # HMAC con clave del servidor: un volcado de la base no permite probar el millón de códigos.
+    clave = hmac.new(config.JWT_SECRET.encode(), b"xentinel-otp-v1", sha256).digest()
+    return hmac.new(clave, f"{identificador}:{codigo}".encode(), sha256).hexdigest()
 
 
-def token_invalido():
+def codigo_invalido():
     return ErrorAPI(
-        400, "INVALID_RESET_TOKEN", "El enlace es inválido, venció o ya fue utilizado"
+        400,
+        "INVALID_RESET_CODE",
+        "El código es incorrecto, venció o ya fue utilizado. Solicita uno nuevo.",
     )
 
 
@@ -245,11 +254,51 @@ def invalidar_tokens(db, identificador):
     )
 
 
+def comprobar_codigo(conexion, config, correo, codigo, consumir):
+    """Usuario del código válido o None. Un fallo suma un intento; al quinto se anula."""
+    usuario = conexion.fila(
+        """SELECT id_usuarios FROM usuarios WHERE lower(btrim(correo))=%s
+        AND lower(estado)='activo' FOR UPDATE""",
+        correo,
+    )
+    if not usuario:
+        hash_codigo(config, 0, codigo)
+        return None
+    identificador = usuario["id_usuarios"]
+    token = conexion.fila(
+        """SELECT id_token,token_hash FROM password_reset_tokens WHERE id_usuarios=%s
+        AND usado_en IS NULL AND token_expiracion>now() AND intentos<%s
+        ORDER BY id_token DESC LIMIT 1 FOR UPDATE""",
+        identificador,
+        MAXIMO_INTENTOS_CODIGO,
+    )
+    if not token:
+        return None
+    if not hmac.compare_digest(
+        token["token_hash"], hash_codigo(config, identificador, codigo)
+    ):
+        conexion.ejecutar(
+            """UPDATE password_reset_tokens SET intentos=intentos+1,
+            usado_en=CASE WHEN intentos+1>=%s THEN now() END WHERE id_token=%s""",
+            MAXIMO_INTENTOS_CODIGO,
+            token["id_token"],
+        )
+        return None
+    if consumir:
+        conexion.ejecutar(
+            "UPDATE password_reset_tokens SET usado_en=now() WHERE id_token=%s",
+            token["id_token"],
+        )
+    return identificador
+
+
 @rutas.post("/auth/olvide-contrasena", status_code=202)
 def solicitar_recuperacion(datos: SolicitudRecuperacion, db: Base, solicitud: Request):
     config = solicitud.app.state.configuracion
-    if not config.SMTP_HOST and config.NODE_ENV != "test":
+    if not config.correo_configurado and config.NODE_ENV != "test":
         raise ErrorAPI(503, "INTERNAL_ERROR", "No se pudo completar la solicitud")
+    # Por correo, exista o no la cuenta: limita el abuso sin revelar qué correos existen.
+    contar_peticion(db, datos.correo, "reset-correo", SOLICITUDES_POR_CORREO, 900)
     with db.transaccion() as conexion:
         usuario = conexion.fila(
             """SELECT id_usuarios,correo FROM usuarios
@@ -264,81 +313,70 @@ def solicitar_recuperacion(datos: SolicitudRecuperacion, db: Base, solicitud: Re
                 identificador,
             )
             if not reciente:
-                invalidar_tokens(conexion, identificador)
-                token = token_hex(32)
+                # Un código nuevo reemplaza a los anteriores (y su correo pendiente).
+                conexion.ejecutar(
+                    "DELETE FROM password_reset_tokens WHERE id_usuarios=%s",
+                    identificador,
+                )
+                codigo = f"{randbelow(1_000_000):06d}"
                 creado = conexion.fila(
                     """INSERT INTO password_reset_tokens(id_usuarios,token_hash,token_expiracion)
                     VALUES(%s,%s,now()+make_interval(mins=>%s)) RETURNING id_token""",
                     identificador,
-                    hash_token(token),
+                    hash_codigo(config, identificador, codigo),
                     config.RESET_TTL_MINUTES,
                 )
-                # El fragmento mantiene el token fuera de los registros de acceso HTTP.
                 enlace = (
                     urlsplit(config.RESET_PASSWORD_URL)
-                    ._replace(
-                        fragment=urlencode(
-                            {"token": token, "correo": usuario["correo"]}
-                        )
-                    )
+                    ._replace(fragment=urlencode({"correo": usuario["correo"]}))
                     .geturl()
                 )
                 conexion.ejecutar(
                     "INSERT INTO mail_outbox(id_token,payload_encrypted) VALUES(%s,%s)",
                     creado["id_token"],
-                    cifrar_correo({"to": usuario["correo"], "link": enlace}, config),
+                    cifrar_correo(
+                        {"to": usuario["correo"], "codigo": codigo, "link": enlace},
+                        config,
+                    ),
                 )
     return responder(
         {
-            "message": "Si el correo corresponde a una cuenta activa, recibirás un enlace "
-            "para restablecer la contraseña."
+            "message": "Si el correo corresponde a una cuenta activa, recibirás un código "
+            "de 6 dígitos para restablecer la contraseña."
         },
         202,
     )
 
 
 @rutas.post("/auth/validar-recuperacion")
-def validar_recuperacion(datos: ValidacionRecuperacion, db: Base):
-    token = db.fila(
-        """SELECT t.id_token FROM password_reset_tokens t JOIN usuarios u USING(id_usuarios)
-        WHERE token_hash=%s AND lower(btrim(correo))=%s AND usado_en IS NULL
-        AND token_expiracion>now() AND lower(estado)='activo' """,
-        hash_token(datos.token),
-        datos.correo,
-    )
-    if not token:
-        raise token_invalido()
+def validar_recuperacion(datos: ValidacionRecuperacion, db: Base, solicitud: Request):
+    config = solicitud.app.state.configuracion
+    with db.transaccion() as conexion:
+        valido = comprobar_codigo(conexion, config, datos.correo, datos.codigo, False)
+    # Fuera de la transacción: el intento fallido queda registrado aunque se responda 400.
+    if not valido:
+        raise codigo_invalido()
     return responder({"valid": True})
 
 
 @rutas.post("/auth/restablecer-contrasena")
-def restablecer(datos: Restablecimiento, db: Base):
+def restablecer(datos: Restablecimiento, db: Base, solicitud: Request):
+    config = solicitud.app.state.configuracion
     hash_guardado = hash_clave(datos.contrasena)
     with db.transaccion() as conexion:
-        # Usuario antes de token, igual que al generar el enlace.
-        usuario = conexion.fila(
-            """SELECT id_usuarios FROM usuarios WHERE lower(btrim(correo))=%s
-            AND lower(estado)='activo' FOR UPDATE""",
-            datos.correo,
+        identificador = comprobar_codigo(
+            conexion, config, datos.correo, datos.codigo, True
         )
-        if not usuario:
-            raise token_invalido()
-        identificador = usuario["id_usuarios"]
-        token = conexion.fila(
-            """UPDATE password_reset_tokens SET usado_en=now() WHERE token_hash=%s
-            AND id_usuarios=%s AND usado_en IS NULL AND token_expiracion>now() RETURNING id_token""",
-            hash_token(datos.token),
-            identificador,
-        )
-        if not token:
-            raise token_invalido()
-        conexion.ejecutar(
-            """UPDATE usuarios SET contrasena=%s,requiere_restablecimiento=false,
-            auth_version=auth_version+1 WHERE id_usuarios=%s""",
-            hash_guardado,
-            identificador,
-        )
-        invalidar_tokens(conexion, identificador)
+        if identificador:
+            conexion.ejecutar(
+                """UPDATE usuarios SET contrasena=%s,requiere_restablecimiento=false,
+                auth_version=auth_version+1 WHERE id_usuarios=%s""",
+                hash_guardado,
+                identificador,
+            )
+            invalidar_tokens(conexion, identificador)
+    if not identificador:
+        raise codigo_invalido()
     return responder({"message": "Contraseña actualizada. Inicia sesión de nuevo."})
 
 

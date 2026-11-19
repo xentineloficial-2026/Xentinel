@@ -9,22 +9,22 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from . import accesos, alertas, autenticacion, catalogos, eventos, personas, programas
+from . import (
+    accesos,
+    alertas,
+    autenticacion,
+    catalogos,
+    eventos,
+    personas,
+    programas,
+    sismos,
+)
 from .base_datos import BaseDatos, verificar_esquema
 from .configuracion import RAIZ, cargar_configuracion
-from .correo import conectar_smtp, mantener, procesar_correo
+from .correo import mantener, procesar_correo, verificar_correo
 from .proteccion_http import MANEJADORES, ProteccionHTTP
 
 LOG = logging.getLogger(__name__)
-
-
-def verificar_smtp(config):
-    # Un SMTP inalcanzable no debe tumbar la API: los correos quedan en cola y se reintentan.
-    try:
-        with conectar_smtp(config):
-            pass
-    except OSError as error:
-        LOG.error("SMTP no disponible (%s); los correos quedan en cola", error)
 
 
 def crear_aplicacion(configuracion=None):
@@ -39,15 +39,17 @@ def crear_aplicacion(configuracion=None):
             await run_in_threadpool(verificar_esquema, base)
             app.state.base = base
             app.state.conexiones_eventos = eventos.ConexionesEventos()
-            if config.SMTP_HOST:
-                await run_in_threadpool(verificar_smtp, config)
+            if config.correo_configurado:
+                await run_in_threadpool(verificar_correo, config)
                 tareas.append(
                     asyncio.create_task(mantener(2, procesar_correo, base, config))
                 )
             elif config.NODE_ENV == "production":
                 LOG.warning(
-                    "SMTP sin configurar: la recuperación de contraseña responde 503"
+                    "Correo sin configurar: la recuperación de contraseña responde 503"
                 )
+            if config.SEISMIC_ENABLED == "true":
+                tareas.extend(sismos.iniciar(base, config))
             tareas.append(
                 asyncio.create_task(
                     mantener(

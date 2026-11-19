@@ -284,7 +284,7 @@ class ProteccionHTTP:
                         900,
                     )
                 if ruta in RUTAS_RESET:
-                    await run_in_threadpool(contar_peticion, db, ip, "reset", 10, 900)
+                    await run_in_threadpool(contar_peticion, db, ip, "reset", 30, 900)
                 if ruta == "/api/v1/alertas/sos" and metodo == "POST":
                     await run_in_threadpool(contar_peticion, db, ip, "sos", 30, 60)
             if metodo in ("POST", "PUT", "PATCH", "DELETE"):

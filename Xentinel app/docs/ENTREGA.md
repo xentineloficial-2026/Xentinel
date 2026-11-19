@@ -1,3 +1,11 @@
+# Entrega del 19 de noviembre de 2026 — v1.2.0 (5)
+
+- **Recuperación con código:** la contraseña se restablece con un código de 6 dígitos enviado desde el Gmail de Xentinel (Gmail API o contraseña de aplicación por SMTP). Vence a los 15 minutos, admite 5 intentos y se guarda cifrado con HMAC en el servidor. El correo es HTML de tema oscuro con versión en texto.
+- **Alertas sísmicas:** el backend escucha EMSC por WebSocket y consulta USGS como respaldo, filtra por distancia a la sede y magnitud, y deduplica entre agencias. Crea la alerta de emergencia que la web y la app muestran al instante, y la envía por Firebase Cloud Messaging al tema `alertas_sismo`. En Android: canal `canal_sismos_critico` con importancia máxima, sirena propia, categoría de alarma (pasa No molestar), acceso opcional a No molestar y pantalla completa con el teléfono bloqueado.
+- Firebase es opcional: sin `google-services.json` la app compila y funciona igual, sin notificaciones push.
+
+---
+
 # Entrega del 14 de noviembre de 2026 — v1.1.1 (4)
 
 Producción en la nube, sin IP locales ni puertos, y lectura QR de celular a celular.

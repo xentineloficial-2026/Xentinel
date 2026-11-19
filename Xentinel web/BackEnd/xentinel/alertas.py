@@ -2,9 +2,10 @@
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request, Response
 from pydantic import Field, StrictBool, StringConstraints, field_validator
 
+from . import push
 from .http import Base, Entrada, ErrorAPI, Id, IdRuta, Paginacion, responder, texto
 from .seguridad import Administrador, InstructorOAdmin, SesionActual, es_admin
 
@@ -20,6 +21,13 @@ class Alerta(Entrada):
     severidad: Literal["informativa", "moderada", "alta", "critica"] = "alta"
     fuente: texto(1, 120) = "Operador SENA"
     referencia_externa: texto(1, 200) = None
+
+
+class SuscripcionWeb(Entrada):
+    token: Annotated[
+        str,
+        StringConstraints(min_length=20, max_length=4096, pattern=r"^[A-Za-z0-9_:-]+$"),
+    ]
 
 
 class UbicacionSOS(Entrada):
@@ -113,6 +121,25 @@ def crear(datos: Alerta, db: Base, sesion: Administrador):
         sesion.id,
     )
     return responder(fila, 201)
+
+
+@rutas.post("/suscribir-web", status_code=204)
+def suscribir_web(datos: SuscripcionWeb, solicitud: Request, sesion: SesionActual):
+    """Suscribe el navegador (token Web Push de Firebase) al tema de alertas sísmicas."""
+    config = solicitud.app.state.configuracion
+    if not config.cuenta_firebase:
+        raise ErrorAPI(
+            503, "PUSH_UNAVAILABLE", "Las notificaciones push no están configuradas"
+        )
+    try:
+        push.suscribir_web(config, datos.token)
+    except (OSError, KeyError, ValueError):
+        raise ErrorAPI(
+            502,
+            "PUSH_FAILED",
+            "No se pudieron activar las notificaciones. Intenta de nuevo.",
+        ) from None
+    return Response(status_code=204)
 
 
 @rutas.post("/sos", status_code=201)

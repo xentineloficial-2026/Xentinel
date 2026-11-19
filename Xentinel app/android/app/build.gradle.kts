@@ -3,7 +3,11 @@ import java.util.Properties
 plugins {
     id("com.android.application")
     id("dev.flutter.flutter-gradle-plugin")
+    id("com.google.gms.google-services") apply false
 }
+
+// Sin google-services.json (Firebase) la app compila igual y las alertas push quedan desactivadas.
+if (file("google-services.json").exists()) apply(plugin = "com.google.gms.google-services")
 
 // Production signing is supplied locally and never falls back to the debug key.
 val signingProperties = Properties()
@@ -25,6 +29,8 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // flutter_local_notifications usa APIs de java.time en Android antiguos.
+        isCoreLibraryDesugaringEnabled = true
     }
 
     defaultConfig {
@@ -59,4 +65,8 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }

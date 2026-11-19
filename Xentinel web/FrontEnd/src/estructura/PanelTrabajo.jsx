@@ -41,6 +41,7 @@ import { MiPerfil } from '../compartido/componentes/MiPerfil.jsx';
 import { PanelAlertas } from '../compartido/componentes/PanelAlertas.jsx';
 import { InterrupcionEmergencia } from '../compartido/componentes/InterrupcionEmergencia.jsx';
 import { useInterrupcion } from '../compartido/ganchos/useInterrupcion.js';
+import { escucharAlertasEnPrimerPlano } from '../compartido/servicios/alertasPush.js';
 import { MiCredencial } from '../modulos/visitante/MiCredencial.jsx';
 import { FondoFacetas } from '../compartido/visual/FondoFacetas.jsx';
 import '../compartido/estilos/panel.css';
@@ -109,6 +110,21 @@ function AlertasActivas({ base }) {
       document.removeEventListener('visibilitychange', revisar);
     };
   }, [actualizar]);
+  /* Con push activado, un sismo recarga las alertas sin esperar al próximo ciclo. */
+  useEfecto(() => {
+    let cancelar = () => {};
+    let vigente = true;
+    escucharAlertasEnPrimerPlano()
+      .then((desuscribir) => {
+        if (vigente) cancelar = desuscribir;
+        else desuscribir();
+      })
+      .catch(() => {});
+    return () => {
+      vigente = false;
+      cancelar();
+    };
+  }, []);
   const { alerta: urgente, atender } = useInterrupcion(recurso.datos);
   if (recurso.estado === 'error' && !recurso.datos?.length)
     return (

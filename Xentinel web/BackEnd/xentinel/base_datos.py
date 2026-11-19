@@ -14,6 +14,7 @@ VERSIONES = (
     "003_programas_admin",
     "004_perfil_asistencia",
     "005_rls_correo_opcional",
+    "006_codigos_sismos",
 )
 
 
@@ -91,6 +92,8 @@ def verificar_esquema(db):
         "SELECT activo FROM programa LIMIT 0",
         "SELECT modificado_por, modificado_en FROM asistencia LIMIT 0",
         "SELECT contenido FROM usuario_foto LIMIT 0",
+        "SELECT intentos FROM password_reset_tokens LIMIT 0",
+        "SELECT evento_id, distancia_km, id_alerta FROM sismos_detectados LIMIT 0",
     ):
         db.ejecutar(consulta)
 

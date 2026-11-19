@@ -61,6 +61,29 @@ class AuthRepository {
     );
   }
 
+  /// Comprueba el código de 6 dígitos sin consumirlo (cada fallo cuenta un intento).
+  Future<void> verifyResetCode(String email, String code) async {
+    await _client.request(
+      'auth/validar-recuperacion',
+      method: 'POST',
+      authenticated: false,
+      body: {'correo': email.trim().toLowerCase(), 'codigo': code},
+    );
+  }
+
+  Future<void> resetPassword(String email, String code, String password) async {
+    await _client.request(
+      'auth/restablecer-contrasena',
+      method: 'POST',
+      authenticated: false,
+      body: {
+        'correo': email.trim().toLowerCase(),
+        'codigo': code,
+        'contrasena': password,
+      },
+    );
+  }
+
   Future<void> logout() async {
     await _client.request('auth/logout', method: 'POST');
   }

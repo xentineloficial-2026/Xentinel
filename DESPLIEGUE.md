@@ -7,7 +7,7 @@ La app, la web y el backend viven en internet, en direcciones `https://` fijas. 
 | Backend `xentinel-api` | Render | <https://xentinel-api.onrender.com> | Se duerme tras 15 minutos sin uso y tarda cerca de un minuto en despertar |
 | Web `xentinel-web` | Render, sitio estático | <https://xentinel-web.onrender.com> | Las actualizaciones se publican al hacer push |
 | Base de datos | Supabase (PostgreSQL 17) | Proyecto `btecqrdsbbrejtltlzto`, us-east-1 | 500 MB; el proyecto se pausa tras una semana sin actividad |
-| Correo (opcional) | Brevo | `smtp-relay.brevo.com:2525` | 300 correos al día |
+| Correo (opcional) | Gmail de Xentinel | Gmail API o SMTP | Unos 500 correos al día |
 
 **Este plan sirve para probar y mostrar el proyecto. Antes de atender emergencias reales, pasa el backend a un plan de pago que no se duerma.** No uses servicios que hagan pings para mantenerlo despierto: agotarían las horas gratis de Render.
 
@@ -44,16 +44,41 @@ pg_restore --no-owner --no-acl --clean --if-exists --dbname="DATABASE_URL_DE_REN
 
 Usa el mismo `DATABASE_URL` del backend, para que las tablas sigan siendo de `xentinel_api`. `pg_restore` puede mostrar avisos sobre extensiones o el esquema `public`. Después, en Render, abre `xentinel-api` y elige **Manual Deploy > Restart service**: al arrancar se aplican las migraciones que falten.
 
-## 3. Correo con Brevo (opcional)
+## 3. Correo de recuperación con Gmail
 
-Sin correo, la API funciona igual y la recuperación de contraseña responde que no está disponible. Para activarla:
+La recuperación de contraseña envía un **código de 6 dígitos** que vence a los 15 minutos, admite 5 intentos y se puede pedir 3 veces cada 15 minutos por correo. Se usa la cuenta de Gmail oficial de Xentinel. Sin correo configurado, la API funciona igual y la recuperación responde que no está disponible. Gmail permite unos 500 envíos al día desde una cuenta personal.
 
-1. Crea una cuenta en <https://www.brevo.com>.
-2. En **Settings > Senders & IPs > Senders**, agrega y verifica el correo que enviará los mensajes.
-3. En **SMTP & API > SMTP**, genera una **clave SMTP** y anota el usuario de inicio de sesión.
-4. En Render, en `xentinel-api` > **Environment**, escribe `SMTP_HOST=smtp-relay.brevo.com`, `SMTP_USER`, `SMTP_PASS` y `SMTP_FROM` (`Xentinel <tu-correo-verificado>`). El puerto 2525 ya está en `render.yaml`.
+**Opción A: Gmail API (funciona en el plan gratis de Render).** Render gratis bloquea los puertos SMTP, así que el envío va por HTTPS:
 
-## 4. Servicios en Render
+1. Con la cuenta de Gmail de Xentinel, entra a <https://console.cloud.google.com>, crea un proyecto y habilita **Gmail API**.
+2. En **Google Auth Platform > Branding/Audience**, configura la pantalla de consentimiento como **Externa**, y en **Audience** cambia el estado a **In production**. En modo de prueba el permiso vence cada 7 días. Google mostrará un aviso de app no verificada al autorizar: es normal para uso propio.
+3. En **Clients**, crea un **ID de cliente OAuth** de tipo **Aplicación web** con el URI de redirección `https://developers.google.com/oauthplayground`.
+4. Abre <https://developers.google.com/oauthplayground>, pulsa el engranaje, marca **Use your own OAuth credentials** y pega el ID y el secreto del cliente. En el paso 1 escribe el alcance `https://www.googleapis.com/auth/gmail.send`, autoriza con la cuenta de Xentinel y en el paso 2 pulsa **Exchange authorization code for tokens**. Copia el **Refresh token**.
+5. En Render, `xentinel-api` > **Environment**: `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` y `SMTP_FROM` (`Xentinel <correo-de-xentinel@gmail.com>`).
+
+**Opción B: contraseña de aplicación por SMTP (en tu PC o en un plan de pago de Render).**
+
+1. En <https://myaccount.google.com/security> activa la **verificación en 2 pasos** de la cuenta de Xentinel.
+2. En <https://myaccount.google.com/apppasswords> crea una contraseña de aplicación llamada `Xentinel` y copia los 16 caracteres.
+3. Variables: `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=465`, `SMTP_SECURE=true`, `SMTP_USER` (el correo), `SMTP_PASS` (la contraseña de aplicación) y `SMTP_FROM`.
+
+Si están las dos, se usa Gmail API.
+
+## 4. Alertas sísmicas
+
+El backend vigila los sismos a 500 km de la sede (Bogotá) desde magnitud 4.0. Usa el WebSocket de **EMSC** (aviso segundos después de que la agencia lo publica) y, como respaldo, consulta a **USGS** cada 30 segundos. Cada sismo crea una alerta de emergencia: la web y la app abiertas la muestran al instante a pantalla completa y con sirena. Si EMSC y USGS informan el mismo sismo (menos de 2 minutos y 50 km de diferencia), sale una sola alerta. La alerta se cierra sola a los 30 minutos.
+
+- **No es una alerta temprana.** Las agencias publican el sismo uno o varios minutos después de ocurrido. Sirve para avisar y activar el protocolo, no para anticipar el movimiento. Esa función requiere una red de sensores (en Colombia, el Servicio Geológico Colombiano).
+- **Plan gratis:** el monitor solo vigila mientras `xentinel-api` está despierto; se duerme tras 15 minutos sin visitas. Para vigilar las 24 horas hace falta un plan de pago.
+
+**Notificaciones con la app o el navegador cerrados (Firebase Cloud Messaging).** Sin Firebase todo lo anterior funciona; con Firebase el aviso llega también a teléfonos y navegadores cerrados, por el tema `alertas_sismo`.
+
+1. En <https://console.firebase.google.com> crea el proyecto `xentinel`.
+2. **Android:** agrega una app Android con el paquete `co.edu.sena.xentinel`, descarga `google-services.json` y guárdalo en `Xentinel app/android/app/`. Recompila la APK (sección 6). La app pide permiso de notificaciones al abrir; en **Alertas** se concede la pantalla completa y el sonido en No molestar.
+3. **Web:** en **Configuración del proyecto > General** agrega una app web y copia `apiKey`, `projectId`, `messagingSenderId` y `appId`. En **Cloud Messaging > Certificados web push** genera un par de claves (VAPID). En Render, `xentinel-web` > **Environment**: `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_MESSAGING_SENDER_ID`, `VITE_FIREBASE_APP_ID` y `VITE_FIREBASE_VAPID_KEY`; luego **Manual Deploy**. Cada persona activa las alertas en el módulo **Alertas** de la web.
+4. **Servidor:** en **Configuración del proyecto > Cuentas de servicio** pulsa **Generar nueva clave privada**. Pega el JSON completo, en una línea, en `FIREBASE_SERVICE_ACCOUNT` de `xentinel-api` > **Environment**. Es un secreto: nunca lo subas al repositorio.
+
+## 5. Servicios en Render
 
 Los dos servicios se crean desde `render.yaml` (**New > Blueprint**, repositorio `Xentinel`, ambos gratis). Valores del panel:
 
@@ -63,14 +88,14 @@ Los dos servicios se crean desde `render.yaml` (**New > Blueprint**, repositorio
 | `JWT_SECRET`, `MAIL_ENCRYPTION_KEY`, `QR_SECRET` | Secretos aleatorios propios de producción; no reutilices los de tu `.env` |
 | `WEB_ORIGINS` | `https://xentinel-web.onrender.com` |
 | `RESET_PASSWORD_URL` | `https://xentinel-web.onrender.com/restablecer-contrasena` |
-| `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | Vacíos hasta configurar Brevo |
+| `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | Vacíos hasta configurar Gmail (sección 3) |
 | `VITE_API_URL` | `https://xentinel-api.onrender.com` (sin `/api/v1`) |
 
 Comprueba que `https://xentinel-api.onrender.com/ready` responda `{"status":"ready"}`. La primera vez puede tardar cerca de un minuto.
 
 Si el despliegue falla, revisa en los registros de `xentinel-api` primero el enlace de Supabase (usuario, clave y host del pooler) y luego el correo.
 
-## 5. Compilar la APK definitiva (Android)
+## 6. Compilar la APK definitiva (Android)
 
 `Xentinel app/config/production.json` ya apunta a `https://xentinel-api.onrender.com/api/v1`, y la app usa esa misma dirección por defecto.
 
@@ -105,7 +130,7 @@ En Windows, el script además la publica en la página de descarga de la web:
 
 Esta compilación no muestra "Configurar servidor" e ignora cualquier IP vieja guardada en el teléfono.
 
-## 6. iPhone (iOS)
+## 7. iPhone (iOS)
 
 El proyecto ya incluye la carpeta `ios`, pero Apple exige dos cosas que no se pueden reemplazar desde Windows:
 

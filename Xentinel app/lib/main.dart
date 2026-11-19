@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
 import 'core/server_clock.dart';
+import 'services/seismic_alerts.dart';
 import 'services/server_settings.dart';
 
 Future<void> main() async {
@@ -26,7 +27,11 @@ Future<void> main() async {
       ),
     );
   }
-  await Future.wait([ServerSettings.load(), ServerClock.load()]);
+  await Future.wait([
+    ServerSettings.load(),
+    ServerClock.load(),
+    SeismicAlerts.initializeFirebase(),
+  ]);
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.light);
   runApp(const ProviderScope(child: XentinelApp()));

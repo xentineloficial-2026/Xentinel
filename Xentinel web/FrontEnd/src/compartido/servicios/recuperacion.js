@@ -1,38 +1,27 @@
-/** Recuperación verificada: el correo entrega token + correo; el servidor revalida ambos al guardar. */
+/** Recuperación con código de 6 dígitos: el servidor limita los intentos y revalida al guardar. */
 import { solicitar } from './cliente.js';
 async function solicitarRecuperacion(correo) {
   await solicitar('/auth/olvide-contrasena', {
     method: 'POST',
-    body: {
-      correo,
-    },
+    body: { correo },
     publicRequest: true,
   });
 }
 export { solicitarRecuperacion };
-async function verificarEnlace(token, correo, senal) {
-  /* data, datos: valor de trabajo utilizado en esta operación. */
+async function verificarCodigo(correo, codigo) {
   const { data: datos } = await solicitar('/auth/validar-recuperacion', {
     method: 'POST',
-    body: {
-      token,
-      correo,
-    },
-    signal: senal,
+    body: { correo, codigo },
     publicRequest: true,
   });
   if (datos?.valid !== true)
-    throw new Error('El enlace no es válido o ya venció. Solicita uno nuevo.');
+    throw new Error('El código no es válido o ya venció. Solicita uno nuevo.');
 }
-export { verificarEnlace };
-async function restablecerContrasena(token, correo, contrasena) {
+export { verificarCodigo };
+async function restablecerContrasena(correo, codigo, contrasena) {
   await solicitar('/auth/restablecer-contrasena', {
     method: 'POST',
-    body: {
-      token,
-      correo,
-      contrasena,
-    },
+    body: { correo, codigo, contrasena },
     publicRequest: true,
   });
 }

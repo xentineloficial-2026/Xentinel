@@ -769,3 +769,9 @@ button.xn-texto-enlace {
     aspect-ratio: 3 / 1;
   }
 }
+.xn-codigo-otp {
+  font-family: var(--xn-mono);
+  font-size: 24px;
+  letter-spacing: 0.4em;
+  text-align: center;
+}

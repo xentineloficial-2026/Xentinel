@@ -4,6 +4,7 @@ import { useAutenticacion } from '../contextos/autenticacion.js';
 import { rolParaUsuario } from '../../configuracion/navegacion.js';
 import { useRecurso } from '../ganchos/useRecurso.js';
 import { solicitar } from '../servicios/cliente.js';
+import { AlertasNavegador } from './AlertasNavegador.jsx';
 import { Dialogo } from './Dialogo.jsx';
 import { MensajeEstado, EstadoConsulta } from './MensajeEstado.jsx';
 import { TablaDatos, Paginacion } from './TablaDatos.jsx';
@@ -545,6 +546,7 @@ function PanelAlertas() {
       <MensajeEstado {...retroalimentacion} />
       <EstadoConsulta recurso={recurso}>
         <div className="xn-alert-list">
+          <AlertasNavegador />
           {recurso.datos?.map((alerta) => (
             <article className="xn-trabajo-tarjeta" key={alerta.id_alerta}>
               <div className="xn-tarjeta-titulo">

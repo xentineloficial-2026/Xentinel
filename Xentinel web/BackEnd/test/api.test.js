@@ -1,8 +1,17 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { createDecipheriv, createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import {
+  createDecipheriv,
+  createHash,
+  createHmac,
+  generateKeyPairSync,
+  randomBytes,
+  randomUUID,
+} from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { request as httpRequest } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
+import { promisify } from 'node:util';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { createPool } from '../src/db.js';
@@ -98,7 +107,7 @@ test('migraciones repetibles y esquema esperado', async () => {
   // El migrador anterior verifica que FastAPI conserva los checksums existentes.
   await migrate(pool);
   await migrarFastApi(config.DATABASE_URL);
-  assert.equal((await pool.query('SELECT count(*)::int n FROM schema_migrations')).rows[0].n, 5);
+  assert.equal((await pool.query('SELECT count(*)::int n FROM schema_migrations')).rows[0].n, 6);
   const result = await pool.query(
     "SELECT column_name FROM information_schema.columns WHERE table_name='password_reset_tokens'",
   );
@@ -387,7 +396,17 @@ test('rollback SQL no publica eventos', async () => {
     db.release();
   }
 });
-test('recuperación: respuesta genérica, correo cifrado, validación, vencimiento, uso único y revocación', async () => {
+function descifrarCorreo(valor) {
+  const [iv, tag, encrypted] = valor.split('.').map((parte) => Buffer.from(parte, 'base64'));
+  const descifrador = createDecipheriv('aes-256-gcm', Buffer.from(config.MAIL_ENCRYPTION_KEY, 'hex'), iv);
+  descifrador.setAuthTag(tag);
+  return JSON.parse(Buffer.concat([descifrador.update(encrypted), descifrador.final()]));
+}
+async function ultimoCorreo() {
+  const fila = (await pool.query('SELECT payload_encrypted FROM mail_outbox ORDER BY id_mail DESC LIMIT 1')).rows[0];
+  return { cifrado: fila.payload_encrypted, datos: descifrarCorreo(fila.payload_encrypted) };
+}
+test('recuperación con código: respuesta genérica, correo cifrado, intentos, vencimiento, uso único y límites', async () => {
   const correo = 'student@test.example';
   const missing = await api('/auth/olvide-contrasena', {
     method: 'POST',
@@ -396,57 +415,40 @@ test('recuperación: respuesta genérica, correo cifrado, validación, vencimien
   const known = await api('/auth/olvide-contrasena', { method: 'POST', body: { correo } });
   assert.equal(known.status, 202);
   assert.deepEqual(known.body, missing.body);
-  const pending = (await pool.query('SELECT payload_encrypted FROM mail_outbox')).rows[0];
-  assert.ok(!pending.payload_encrypted.includes(correo));
-  const [iv, tag, encrypted] = pending.payload_encrypted
-    .split('.')
-    .map((parte) => Buffer.from(parte, 'base64'));
-  const descifrador = createDecipheriv('aes-256-gcm', Buffer.from(config.MAIL_ENCRYPTION_KEY, 'hex'), iv);
-  descifrador.setAuthTag(tag);
-  const correoCompatible = JSON.parse(Buffer.concat([descifrador.update(encrypted), descifrador.final()]));
+  const { cifrado, datos: correoCompatible } = await ultimoCorreo();
+  assert.ok(!cifrado.includes(correo));
   assert.equal(correoCompatible.to, correo);
+  const codigo = correoCompatible.codigo;
+  assert.match(codigo, /^[0-9]{6}$/);
+  assert.ok(!correoCompatible.link.includes(codigo));
+  assert.equal(new URLSearchParams(new URL(correoCompatible.link).hash.slice(1)).get('correo'), correo);
+  // El correo cifrado por Node sigue siendo legible para el worker de FastAPI.
   await pool.query('UPDATE mail_outbox SET payload_encrypted=$1', [encryptMail(correoCompatible, config)]);
   const enviado = await recogerCorreoFastApi(config);
-  assert.equal(enviado.to, correo);
-  const link = new URL(enviado.link);
-  const token = new URLSearchParams(link.hash.slice(1)).get('token');
-  assert.equal(token.length, 64);
-  const dbToken = (await pool.query('SELECT token_hash FROM password_reset_tokens')).rows[0];
-  assert.notEqual(dbToken.token_hash, token);
-  const body = { correo, token };
-  assert.equal(
-    (
-      await api('/auth/validar-recuperacion', {
-        method: 'POST',
-        body: { ...body, correo: 'other@test.example' },
-      })
-    ).status,
-    400,
-  );
-  assert.equal((await api('/auth/validar-recuperacion', { method: 'POST', body })).status, 200);
+  assert.deepEqual([enviado.to, enviado.codigo], [correo, codigo]);
+  const guardado = (await pool.query('SELECT token_hash FROM password_reset_tokens')).rows[0].token_hash;
+  assert.equal(guardado.length, 64);
+  assert.ok(!guardado.includes(codigo));
+  const erroneo = codigo === '000000' ? '111111' : '000000';
+  const validar = (cuerpo) => api('/auth/validar-recuperacion', { method: 'POST', body: cuerpo });
+  const errado = await validar({ correo, codigo: erroneo });
+  assert.equal(errado.status, 400);
+  assert.equal(errado.body.error.code, 'INVALID_RESET_CODE');
+  assert.equal((await pool.query('SELECT intentos FROM password_reset_tokens')).rows[0].intentos, 1);
+  assert.equal((await validar({ correo: 'other@test.example', codigo })).status, 400);
+  assert.equal((await validar({ correo, codigo: '12345' })).status, 422);
+  assert.equal((await validar({ correo, codigo })).status, 200);
   assert.equal((await pool.query('SELECT usado_en FROM password_reset_tokens')).rows[0].usado_en, null);
   await pool.query(
-    "UPDATE password_reset_tokens SET creado_en=now()-interval '2 hours',token_expiracion=now()-interval '1 hour'",
+    "UPDATE password_reset_tokens SET creado_en=now()-interval '2 hours',token_expiracion=now()-interval '1 minute'",
   );
-  assert.equal(
-    (
-      await api('/auth/restablecer-contrasena', {
-        method: 'POST',
-        body: { ...body, contrasena: 'Nueva-Contrasena-2026!' },
-      })
-    ).status,
-    400,
-  );
+  const restablecer = (cuerpo) => api('/auth/restablecer-contrasena', { method: 'POST', body: cuerpo });
+  assert.equal((await restablecer({ correo, codigo, contrasena: 'Nueva-Contrasena-2026!' })).status, 400);
   await pool.query("UPDATE password_reset_tokens SET token_expiracion=now()+interval '10 minutes'");
-  const attempts = await Promise.all(
-    [1, 2].map(() =>
-      api('/auth/restablecer-contrasena', {
-        method: 'POST',
-        body: { ...body, contrasena: 'Nueva-Contrasena-2026!' },
-      }),
-    ),
+  const concurrentes = await Promise.all(
+    [1, 2].map(() => restablecer({ correo, codigo, contrasena: 'Nueva-Contrasena-2026!' })),
   );
-  assert.deepEqual(attempts.map((r) => r.status).sort(), [200, 400]);
+  assert.deepEqual(concurrentes.map((r) => r.status).sort(), [200, 400]);
   assert.equal((await api('/auth/me', { token: studentToken })).status, 401);
   const login = await api('/auth/login', {
     method: 'POST',
@@ -454,6 +456,25 @@ test('recuperación: respuesta genérica, correo cifrado, validación, vencimien
   });
   assert.equal(login.status, 200);
   studentToken = login.body.data.access_token;
+  // Un código nuevo reemplaza al anterior; cinco fallos lo anulan aunque luego llegue el correcto.
+  await pool.query("UPDATE password_reset_tokens SET creado_en=now()-interval '2 minutes'");
+  assert.equal((await api('/auth/olvide-contrasena', { method: 'POST', body: { correo } })).status, 202);
+  const segundo = (await ultimoCorreo()).datos.codigo;
+  assert.equal((await pool.query('SELECT count(*)::int n FROM password_reset_tokens')).rows[0].n, 1);
+  const otroErroneo = segundo === '999999' ? '888888' : '999999';
+  for (let intento = 0; intento < 5; intento += 1)
+    assert.equal((await validar({ correo, codigo: otroErroneo })).status, 400);
+  const anulado = (await pool.query('SELECT intentos,usado_en FROM password_reset_tokens')).rows[0];
+  assert.equal(anulado.intentos, 5);
+  assert.ok(anulado.usado_en);
+  assert.equal((await restablecer({ correo, codigo: segundo, contrasena: 'Otra-Contrasena-2026!' })).status, 400);
+  // Tres solicitudes por correo cada 15 minutos, exista o no la cuenta.
+  const limitado = [];
+  for (let intento = 0; intento < 4; intento += 1)
+    limitado.push(
+      (await api('/auth/olvide-contrasena', { method: 'POST', body: { correo: 'limite@test.example' } })).status,
+    );
+  assert.deepEqual(limitado, [202, 202, 202, 429]);
 });
 test('cierre conserva historial y bloquea reportes SOS posteriores', async () => {
   assert.equal(
@@ -913,4 +934,200 @@ test('límite de intentos no depende del proceso ASGI', async () => {
     (await api('/auth/login', { method: 'POST', body: { documento: 'none', contrasena: 'wrong' } })).status,
     429,
   );
+});
+
+/** Servidor local que imita EMSC (WebSocket), USGS (GeoJSON), Google OAuth y FCM. */
+async function serviciosSismicosSimulados(clavePublica) {
+  const recibido = { usgs: [], fcm: [], iid: [], tokens: 0 };
+  const sockets = new Set();
+  const ahora = Date.now();
+  const emsc = [
+    {
+      action: 'create',
+      data: {
+        type: 'Feature',
+        id: '20261119_0000001',
+        geometry: { type: 'Point', coordinates: [-74.28, 4.42, -12] },
+        properties: {
+          unid: '20261119_0000001',
+          time: new Date(ahora - 90000).toISOString(),
+          lat: 4.42,
+          lon: -74.28,
+          depth: 12,
+          mag: 5.5,
+          flynn_region: 'COLOMBIA',
+        },
+      },
+    },
+    { action: 'create', data: { id: 'pequeno', properties: { unid: 'pequeno', time: new Date(ahora).toISOString(), lat: 4.6, lon: -74.1, depth: 5, mag: 3.1 } } },
+    { action: 'update', data: { id: '20261119_0000001', properties: { unid: '20261119_0000001', time: new Date(ahora - 90000).toISOString(), lat: 4.42, lon: -74.28, depth: 12, mag: 5.6 } } },
+    'mensaje que no es JSON',
+  ];
+  const usgs = {
+    type: 'FeatureCollection',
+    features: [
+      {
+        id: 'us7000mismo',
+        properties: { mag: 5.4, place: '25 km SW of Bogotá, Colombia', time: ahora - 60000 },
+        geometry: { type: 'Point', coordinates: [-74.3, 4.4, 10] },
+      },
+      {
+        id: 'us7000lejano',
+        properties: { mag: 6.8, place: 'Chile', time: ahora - 60000 },
+        geometry: { type: 'Point', coordinates: [-70.6, -33.4, 30] },
+      },
+    ],
+  };
+  const leerCuerpo = async (peticion) => {
+    let texto = '';
+    for await (const parte of peticion) texto += parte;
+    return texto;
+  };
+  const servidor = createServer(async (peticion, respuesta) => {
+    const url = new URL(peticion.url, 'http://127.0.0.1');
+    const responderJson = (estado, datos) => {
+      respuesta.writeHead(estado, { 'Content-Type': 'application/json' });
+      respuesta.end(JSON.stringify(datos));
+    };
+    if (url.pathname === '/usgs') {
+      recibido.usgs.push(Object.fromEntries(url.searchParams));
+      return responderJson(200, usgs);
+    }
+    const cuerpo = await leerCuerpo(peticion);
+    if (url.pathname === '/token') {
+      const formulario = new URLSearchParams(cuerpo);
+      const reclamos = jwt.verify(formulario.get('assertion'), clavePublica, {
+        algorithms: ['RS256'],
+        audience: `http://127.0.0.1:${servidor.address().port}/token`,
+      });
+      assert.equal(formulario.get('grant_type'), 'urn:ietf:params:oauth:grant-type:jwt-bearer');
+      assert.equal(reclamos.scope, 'https://www.googleapis.com/auth/firebase.messaging');
+      recibido.tokens += 1;
+      return responderJson(200, { access_token: 'token-simulado', expires_in: 3600 });
+    }
+    if (peticion.headers.authorization !== 'Bearer token-simulado') return responderJson(401, {});
+    if (url.pathname === '/v1/projects/xentinel-pruebas/messages:send') {
+      recibido.fcm.push(JSON.parse(cuerpo).message);
+      return responderJson(200, { name: 'projects/xentinel-pruebas/messages/1' });
+    }
+    if (url.pathname === '/iid/v1:batchAdd') {
+      recibido.iid.push({ cuerpo: JSON.parse(cuerpo), autorizado: peticion.headers.access_token_auth });
+      return responderJson(200, { results: [{}] });
+    }
+    return responderJson(404, {});
+  });
+  // WebSocket mínimo (RFC 6455): el servidor envía tramas de texto sin máscara.
+  servidor.on('upgrade', (peticion, socket) => {
+    const aceptar = createHash('sha1')
+      .update(`${peticion.headers['sec-websocket-key']}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+      .digest('base64');
+    socket.write(
+      `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${aceptar}\r\n\r\n`,
+    );
+    sockets.add(socket);
+    socket.on('error', () => {});
+    socket.on('data', () => {});
+    for (const mensaje of emsc) {
+      const datos = Buffer.from(typeof mensaje === 'string' ? mensaje : JSON.stringify(mensaje));
+      const cabecera =
+        datos.length < 126 ? Buffer.from([0x81, datos.length]) : Buffer.from([0x81, 126, datos.length >> 8, datos.length & 255]);
+      socket.write(Buffer.concat([cabecera, datos]));
+    }
+  });
+  await new Promise((resolver) => servidor.listen(0, '127.0.0.1', resolver));
+  return {
+    recibido,
+    url: `http://127.0.0.1:${servidor.address().port}`,
+    cerrar: () =>
+      new Promise((resolver) => {
+        for (const socket of sockets) socket.destroy();
+        servidor.close(resolver);
+      }),
+  };
+}
+test('monitor sísmico: EMSC y USGS crean una sola alerta, la publican por FCM y suscriben la web', async () => {
+  const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const simulados = await serviciosSismicosSimulados(publicKey);
+  const cuenta = {
+    type: 'service_account',
+    project_id: 'xentinel-pruebas',
+    private_key_id: 'clave-1',
+    private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+    client_email: 'fcm@xentinel-pruebas.iam.gserviceaccount.com',
+    token_uri: `${simulados.url}/token`,
+  };
+  const configSismos = {
+    ...config,
+    SEISMIC_ENABLED: 'true',
+    SEISMIC_EMSC_URL: `${simulados.url.replace('http', 'ws')}/emsc`,
+    SEISMIC_USGS_URL: `${simulados.url}/usgs`,
+    SEISMIC_USGS_INTERVAL: '10',
+    FIREBASE_SERVICE_ACCOUNT: JSON.stringify(cuenta),
+    FCM_API_URL: simulados.url,
+    FCM_IID_URL: simulados.url,
+  };
+  const monitor = await iniciarFastApi(configSismos);
+  try {
+    const limite = Date.now() + 20000;
+    while ((await pool.query('SELECT count(*)::int n FROM sismos_detectados')).rows[0].n < 2) {
+      assert.ok(Date.now() < limite, `sin sismos registrados: ${monitor.diagnostico()}`);
+      await new Promise((resolver) => setTimeout(resolver, 250));
+    }
+    while (simulados.recibido.fcm.length < 1 && Date.now() < limite)
+      await new Promise((resolver) => setTimeout(resolver, 100));
+    const sismos = (await pool.query('SELECT fuente,evento_id,id_alerta,distancia_km FROM sismos_detectados ORDER BY id_sismo')).rows;
+    assert.deepEqual(sismos.map((s) => s.fuente).sort(), ['EMSC', 'USGS']);
+    assert.equal(new Set(sismos.map((s) => s.id_alerta)).size, 1);
+    const alertas = (await pool.query("SELECT * FROM alertas_emergencia WHERE tipo_alerta='Sismo' AND emisor_id IS NULL")).rows;
+    assert.equal(alertas.length, 1);
+    const [alerta] = alertas;
+    assert.equal(alerta.id_alerta, sismos[0].id_alerta);
+    assert.equal(alerta.emisor_id, null);
+    assert.equal(alerta.severidad, 'alta');
+    assert.ok(alerta.activa);
+    assert.match(alerta.mensaje, /magnitud 5\.[45].*Agáchate, cúbrete y sujétate/s);
+    const activas = await api('/alertas/activas', { token: studentToken });
+    assert.ok(activas.body.data.some((fila) => fila.id_alerta === alerta.id_alerta));
+    assert.ok(simulados.recibido.usgs[0].maxradiuskm && simulados.recibido.usgs[0].minmagnitude);
+    // Un solo envío al tema, aunque dos agencias informaron el mismo sismo.
+    await new Promise((resolver) => setTimeout(resolver, 500));
+    assert.equal(simulados.recibido.fcm.length, 1);
+    const [mensaje] = simulados.recibido.fcm;
+    assert.equal(mensaje.topic, 'alertas_sismo');
+    assert.equal(mensaje.notification, undefined);
+    assert.equal(mensaje.android.priority, 'HIGH');
+    assert.equal(mensaje.data.tipo, 'SISMO');
+    assert.equal(mensaje.data.id_alerta, String(alerta.id_alerta));
+    assert.equal(mensaje.webpush.headers.Urgency, 'high');
+    assert.equal(mensaje.webpush.notification.requireInteraction, true);
+    // Suscripción de un navegador: requiere sesión y usa la API de Instance ID.
+    const token = `web-${'a'.repeat(40)}:APA91b_prueba`;
+    const suscribir = (base, sesion) =>
+      fetch(`${base}/api/v1/alertas/suscribir-web`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(sesion ? { Authorization: `Bearer ${sesion}` } : {}) },
+        body: JSON.stringify({ token }),
+      });
+    await pool.query('DELETE FROM api_rate_limits');
+    assert.equal((await suscribir(monitor.base)).status, 401);
+    assert.equal((await suscribir(monitor.base, studentToken)).status, 204);
+    assert.deepEqual(simulados.recibido.iid, [
+      { cuerpo: { to: '/topics/alertas_sismo', registration_tokens: [token] }, autorizado: 'true' },
+    ]);
+    assert.equal((await suscribir(base, studentToken)).status, 503);
+    // Las alertas automáticas se cierran solas al vencer.
+    await pool.query("UPDATE alertas_emergencia SET fecha_inicio=now()-interval '2 hours' WHERE id_alerta=$1", [alerta.id_alerta]);
+    await promisify(execFile)(
+      process.env.XENTINEL_PYTHON || 'python',
+      [
+        '-c',
+        'from xentinel.base_datos import BaseDatos\nfrom xentinel.configuracion import cargar_configuracion\nfrom xentinel.sismos import cerrar_vencidas\nc = cargar_configuracion()\nb = BaseDatos(c.DATABASE_URL)\nwith b.pool:\n    cerrar_vencidas(b, c)',
+      ],
+      { env: { ...process.env, ...config }, timeout: 15000 },
+    );
+    assert.equal((await pool.query('SELECT activa FROM alertas_emergencia WHERE id_alerta=$1', [alerta.id_alerta])).rows[0].activa, false);
+  } finally {
+    await monitor.cerrar();
+    await simulados.cerrar();
+  }
 });

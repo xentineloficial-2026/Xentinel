@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- R8 no debe descartar el sonido ni el icono de la alerta sísmica (se usan por nombre). -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@raw/alerta_sismo,@drawable/ic_notificacion" />

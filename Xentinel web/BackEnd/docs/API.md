@@ -15,9 +15,9 @@ Base: `/api/v1`. JSON UTF-8. `Authorization: Bearer <access_token>` en rutas pro
 | POST `/auth/renovar`                              | Sesión                              | Nuevo JWT con el mismo formato de login; máximo `SESSION_MAX_HOURS` desde el ingreso; 401 `SESSION_MAX_AGE` |
 | GET `/auth/credencial-qr`                         | Sesión                              | Clave del carnet QR rotativo firmado (XN2) del titular, para generarlo también sin conexión                 |
 | PUT `/auth/contrasena`                            | Sesión                              | `{actual,nueva}`; revoca sesiones y recuperación; 204                                                       |
-| POST `/auth/olvide-contrasena`                    | Público, limitado                   | `{correo}`; 202 genérico                                                                                    |
-| POST `/auth/validar-recuperacion`                 | Público, limitado                   | `{correo,token}`; `{valid:true}` sin consumir token                                                         |
-| POST `/auth/restablecer-contrasena`               | Público, limitado                   | `{correo,token,contrasena}`; revalidación y consumo atómico                                                 |
+| POST `/auth/olvide-contrasena`                    | Público, limitado                   | `{correo}`; 202 genérico; envía un código de 6 dígitos (15 min, 3 solicitudes/15 min por correo)            |
+| POST `/auth/validar-recuperacion`                 | Público, limitado                   | `{correo,codigo}`; `{valid:true}` sin consumir el código; cada fallo cuenta (5 máximo)                      |
+| POST `/auth/restablecer-contrasena`               | Público, limitado                   | `{correo,codigo,contrasena}`; revalidación y consumo atómico; 400 `INVALID_RESET_CODE`                      |
 | GET `/usuarios`                                   | Administrador                       | Filtros `id_rol` y `estado=Activo/Inactivo`. Con `estado` devuelve ambos conteos en `meta.totales`          |
 | POST `/usuarios`                                  | Administrador                       | Datos de registro más `id_rol`                                                                              |
 | GET `/usuarios/:id`                               | Propietario / administrador         | Perfil                                                                                                      |
@@ -31,6 +31,7 @@ Base: `/api/v1`. JSON UTF-8. `Authorization: Bearer <access_token>` en rutas pro
 | GET `/alertas/:id`                                | Sesión                              | Detalle                                                                                                     |
 | POST `/alertas`                                   | Administrador                       | Tipo, mensaje, severidad, fuente y referencia opcional                                                      |
 | PATCH `/alertas/:id/cerrar`                       | Administrador                       | Cierra sólo esa alerta; idempotente                                                                         |
+| POST `/alertas/suscribir-web`                     | Sesión                              | `{token}` de Firebase Web Push → tema `alertas_sismo`; 204, 503 sin Firebase                                |
 | POST `/alertas/sos`                               | Sesión                              | `{id_alerta,latitud,longitud}`; propietario tomado del JWT                                                  |
 | GET `/alertas/:id/sos`                            | Administrador                       | Ubicaciones paginadas                                                                                       |
 | POST `/alertas/reportes`                          | Instructor asignado / administrador | `{id_alerta,id_ficha,observaciones?,estudiantes:[{id_usuarios,presente}]}`                                  |
@@ -130,7 +131,7 @@ Códigos de cierre: `4401` sesión inválida, `4403` origen no autorizado, `4409
 
 `POST /ingresos` con `{"codigo_qr":"XN2:…","tipo":"ENTRADA","metodo":"QR","request_id":"<uuid>"}` verifica la firma en el servidor (`422 INVALID_QR`) y la vigencia de ±45 s (`422 QR_EXPIRED`) frente a la hora del servidor o, si se envía, frente a `escaneado_en`. `escaneado_en` (ISO 8601 con zona) permite sincronizar movimientos tomados sin conexión hasta 72 h después (`422 INVALID_SCAN_TIME` fuera de rango); el movimiento conserva esa hora para la asistencia. El reenvío con el mismo `request_id` es idempotente. Los formatos heredados (`id_usuarios`) siguen aceptándose salvo que `QR_REQUIRE_SIGNED=true`, que exige el carnet firmado para el método QR (`422 QR_UNSIGNED`).
 
-Errores: 400 JSON/token inválido, 401 sesión ausente/vencida/revocada, 403 permiso/origen, 404 recurso/ruta, 409 duplicado/referencia/secuencia/concurrencia, 413 tamaño, 422 validación, 429 límite, 500 error interno, 503 correo no configurado. `detail` replica el mensaje para facilitar adaptación del cliente anterior. Los errores internos no exponen SQL ni stack.
+Errores: 400 JSON/token inválido, 401 sesión ausente/vencida/revocada, 403 permiso/origen, 404 recurso/ruta, 409 duplicado/referencia/secuencia/concurrencia, 413 tamaño, 422 validación, 429 límite, 500 error interno, 503 correo o Firebase no configurados. `detail` replica el mensaje para facilitar adaptación del cliente anterior. Los errores internos no exponen SQL ni stack.
 
 Fuentes técnicas: [Express: errores asíncronos](https://expressjs.com/en/guide/error-handling.html), [OWASP: recuperación de contraseña](https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html), [PostgreSQL: triggers](https://www.postgresql.org/docs/17/triggers.html).
 

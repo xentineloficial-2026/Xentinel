@@ -192,7 +192,7 @@ void main() {
     await CameraSession.waitForIdle();
   }
 
-  testWidgets('public recovery link submits email and returns to login', (
+  testWidgets('public recovery sends a code, verifies it and sets a password', (
     tester,
   ) async {
     await mount(tester);
@@ -201,11 +201,36 @@ void main() {
     await tester.tap(find.text('¿Olvidaste tu contraseña?'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextFormField), 'maria@example.test');
-    await tester.tap(find.text('Enviar enlace'));
+    await tester.tap(find.text('Enviar código'));
     await tester.pumpAndSettle();
-    expect(find.text('Revisa tu correo'), findsOneWidget);
-    expect(requests.single.url.path, '/api/v1/auth/olvide-contrasena');
-    await tester.tap(find.text('Volver al inicio de sesión'));
+    expect(find.text('Escribe tu código'), findsOneWidget);
+    // Solo dígitos y como máximo seis.
+    await tester.enterText(find.byType(TextFormField), '48a29150');
+    await tester.tap(find.text('Verificar código'));
+    await tester.pumpAndSettle();
+    expect(find.text('Crea tu nueva contraseña'), findsOneWidget);
+    await tester.enterText(
+      find.byType(TextFormField).at(0),
+      'Nueva-Clave-2026',
+    );
+    await tester.enterText(
+      find.byType(TextFormField).at(1),
+      'Nueva-Clave-2026',
+    );
+    await tester.tap(find.text('Guardar contraseña'));
+    await tester.pumpAndSettle();
+    expect(find.text('Contraseña actualizada'), findsOneWidget);
+    expect(requests.map((request) => request.url.path), [
+      '/api/v1/auth/olvide-contrasena',
+      '/api/v1/auth/validar-recuperacion',
+      '/api/v1/auth/restablecer-contrasena',
+    ]);
+    expect(jsonDecode(requests[1].body), {
+      'correo': 'maria@example.test',
+      'codigo': '482915',
+    });
+    expect(jsonDecode(requests[2].body)['contrasena'], 'Nueva-Clave-2026');
+    await tester.tap(find.text('Iniciar sesión'));
     await tester.pumpAndSettle();
     expect(
       container.read(routerProvider).routeInformationProvider.value.uri.path,

@@ -13,7 +13,7 @@ import {
 } from '../src/compartido/servicios/sesion.js';
 import {
   errorContrasena,
-  verificarEnlace,
+  verificarCodigo,
   restablecerContrasena,
 } from '../src/compartido/servicios/recuperacion.js';
 import {
@@ -151,28 +151,35 @@ probar('cancelación aborta el transporte', async () => {
     (error) => error.name === 'AbortError'
   );
 });
-probar('recuperación exige confirmación positiva del servidor', async () => {
-  globalThis.fetch = async () => Response.json({ data: { valid: false } });
+probar('recuperación exige confirmación positiva del código', async () => {
+  globalThis.fetch = async (direccion, opciones) => {
+    comprobar.equal(direccion, '/api/v1/auth/validar-recuperacion');
+    comprobar.deepEqual(JSON.parse(opciones.body), {
+      correo: 'demo@example.com',
+      codigo: '482915',
+    });
+    return Response.json({ data: { valid: false } });
+  };
   await comprobar.rejects(
-    verificarEnlace('a'.repeat(64), 'demo@example.com'),
+    verificarCodigo('demo@example.com', '482915'),
     /válido/
   );
   globalThis.fetch = async () => Response.json({ data: { valid: true } });
-  await verificarEnlace('a'.repeat(64), 'demo@example.com');
+  await verificarCodigo('demo@example.com', '482915');
 });
-probar('cambio vuelve a enviar token y correo al servidor', async () => {
+probar('cambio vuelve a enviar correo y código al servidor', async () => {
   globalThis.fetch = async (direccion, opciones) => {
     comprobar.equal(direccion, '/api/v1/auth/restablecer-contrasena');
     comprobar.deepEqual(JSON.parse(opciones.body), {
-      token: 'token-prueba',
       correo: 'demo@example.com',
+      codigo: '482915',
       contrasena: 'contrasena-de-prueba',
     });
     return Response.json({ data: { message: 'Listo' } });
   };
   await restablecerContrasena(
-    'token-prueba',
     'demo@example.com',
+    '482915',
     'contrasena-de-prueba'
   );
 });

@@ -5,6 +5,7 @@ import 'core/router.dart';
 import 'core/theme.dart';
 import 'components/alerts_host.dart';
 import 'services/background_sync.dart';
+import 'services/seismic_alerts.dart';
 
 class XentinelApp extends ConsumerWidget {
   const XentinelApp({super.key});
@@ -13,6 +14,8 @@ class XentinelApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     // Renovación de sesión, credencial QR y envío de la cola sin conexión.
     ref.watch(backgroundSyncProvider);
+    // Alertas sísmicas push (si Firebase está configurado).
+    ref.watch(seismicAlertsProvider);
     return MaterialApp.router(
       title: 'Xentinel',
       debugShowCheckedModeBanner: false,
