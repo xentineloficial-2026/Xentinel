@@ -387,14 +387,6 @@ button.xn-texto-enlace {
   color: var(--xn-aviso);
   margin-bottom: 12px;
 }
-.xn-ejemplo-notice {
-  font-size: 14px;
-  padding: 14px 16px;
-  background: var(--xn-superficie);
-  border-radius: var(--xn-radio-s);
-  margin-top: 24px !important;
-  color: var(--xn-tenue);
-}
 .xn-contacto-cuadricula {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
@@ -407,20 +399,15 @@ button.xn-texto-enlace {
   overflow: hidden;
   background: var(--xn-superficie);
 }
-.xn-contacto-foto {
-  aspect-ratio: 4 / 4.7;
-  background: var(--xn-superficie-alterna);
-  overflow: hidden;
-}
-.xn-contacto-foto img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  object-position: center 30%;
-  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.xn-contacto-tarjeta:hover img {
-  transform: scale(1.03);
+.xn-contacto-iniciales {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4 / 3;
+  background: var(--xn-azul-suave);
+  color: var(--xn-azul);
+  font-size: 44px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 .xn-contacto-informacion {
   padding: 18px 14px;
@@ -778,7 +765,7 @@ button.xn-texto-enlace {
   .xn-contacto-cuadricula {
     grid-template-columns: 1fr;
   }
-  .xn-contacto-foto {
-    aspect-ratio: 4/3;
+  .xn-contacto-iniciales {
+    aspect-ratio: 3 / 1;
   }
 }
