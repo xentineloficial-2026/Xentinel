@@ -43,7 +43,10 @@ def visible(evento, usuario):
     return (
         es_admin(usuario)
         or evento["recurso"] in RECURSOS_PUBLICOS
-        or (evento["recurso"] == "acceso" and nombre_rol(usuario) == "celador")
+        or (
+            evento["recurso"] in ("acceso", "alarmas_qr")
+            and nombre_rol(usuario) == "celador"
+        )
         # Solo metadatos: /asistencias decide qué filas de sus fichas puede leer el instructor.
         or (evento["recurso"] == "asistencia" and nombre_rol(usuario) == "instructor")
         or evento["propietario_id"] == usuario["id_usuarios"]

@@ -11,12 +11,15 @@ from starlette.concurrency import run_in_threadpool
 
 from . import (
     accesos,
+    alarmas,
     alertas,
     autenticacion,
     catalogos,
+    estado_correo,
     eventos,
     personas,
     programas,
+    riesgos,
     sismos,
 )
 from .base_datos import BaseDatos, verificar_esquema
@@ -84,6 +87,9 @@ def crear_aplicacion(configuracion=None):
         catalogos.rutas,
         catalogos.reportes,
         alertas.rutas,
+        alarmas.rutas,
+        riesgos.rutas,
+        estado_correo.rutas,
         eventos.rutas,
     ):
         app.include_router(rutas, prefix="/api/v1")
