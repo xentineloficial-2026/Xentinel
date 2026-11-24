@@ -1471,6 +1471,9 @@ test('cambio de correo con código: contraseña, correo nuevo, intentos y uso ú
 });
 async function gmailSimulado() {
   const recibido = { tokens: [], enviados: [] };
+  // Cada renovación entrega un access token distinto; revocar() simula que Google
+  // invalida los ya emitidos antes de que venzan, y sinId una respuesta incompleta.
+  const google = { emitidos: 0, revocados: new Set(), sinId: false };
   const servidor = createServer(async (peticion, respuesta) => {
     let texto = '';
     for await (const parte of peticion) texto += parte;
@@ -1483,17 +1486,23 @@ async function gmailSimulado() {
       recibido.tokens.push(formulario.get('grant_type'));
       if (formulario.get('refresh_token') === 'revocado')
         return responderJson(400, { error: 'invalid_grant', error_description: 'Token has been expired or revoked.' });
-      return responderJson(200, { access_token: 'gmail-simulado', expires_in: 3600 });
+      google.emitidos += 1;
+      return responderJson(200, { access_token: `gmail-simulado-${google.emitidos}`, expires_in: 3600 });
     }
-    if (peticion.url === '/gmail/v1/users/me/messages/send' && peticion.headers.authorization === 'Bearer gmail-simulado') {
+    const token = (peticion.headers.authorization ?? '').replace(/^Bearer /, '');
+    if (peticion.url === '/gmail/v1/users/me/messages/send' && token.startsWith('gmail-simulado-') && !google.revocados.has(token)) {
       recibido.enviados.push(Buffer.from(JSON.parse(texto).raw, 'base64url').toString('utf8'));
-      return responderJson(200, { id: 'mensaje-1' });
+      return responderJson(200, google.sinId ? {} : { id: `mensaje-${recibido.enviados.length}` });
     }
     return responderJson(401, { error: { message: 'Request had invalid authentication credentials.' } });
   });
   await new Promise((resolver) => servidor.listen(0, '127.0.0.1', resolver));
   return {
     recibido,
+    google,
+    revocar: () => {
+      for (let numero = 1; numero <= google.emitidos; numero += 1) google.revocados.add(`gmail-simulado-${numero}`);
+    },
     url: `http://127.0.0.1:${servidor.address().port}`,
     cerrar: () => new Promise((resolver) => servidor.close(resolver)),
   };
@@ -1521,7 +1530,10 @@ test('correo por Gmail API: diagnóstico, prueba de envío, causa exacta del fal
     GMAIL_API_URL: gmail.url,
   };
   const conGmail = await iniciarFastApi(configGmail);
-  const revocado = await iniciarFastApi({ ...configGmail, GMAIL_REFRESH_TOKEN: 'revocado' });
+  // Cada instancia corre su propio worker de correo sobre la misma base: solo una con
+  // Gmail válido queda viva mientras se prueba la cola, para que otra no tome el mensaje.
+  let revocado = await iniciarFastApi({ ...configGmail, GMAIL_REFRESH_TOKEN: 'revocado' });
+  let oficial = null;
   try {
     const estado = await fetch(`${conGmail.base}/api/v1/correo/estado`, {
       headers: { Authorization: `Bearer ${adminToken}` },
@@ -1540,6 +1552,8 @@ test('correo por Gmail API: diagnóstico, prueba de envío, causa exacta del fal
     assert.equal(fallida.body.error.code, 'MAIL_DELIVERY_FAILED');
     assert.match(fallida.body.error.message, /GMAIL_AUTH: HTTP 400 invalid_grant: Token has been expired or revoked/);
     assert.ok(!fallida.body.error.message.includes('secreto-de-prueba'));
+    await revocado.cerrar();
+    revocado = null;
     // El worker entrega por Gmail API el código pedido desde la recuperación.
     await pool.query('DELETE FROM mail_outbox');
     await pool.query('DELETE FROM password_reset_tokens');
@@ -1559,9 +1573,29 @@ test('correo por Gmail API: diagnóstico, prueba de envío, causa exacta del fal
     assert.ok(cola.enviado_en);
     assert.equal(cola.error_codigo, null);
     assert.equal(cola.payload_encrypted, null);
+
+    // Con SMTP_FROM de la cuenta oficial, el correo sale a nombre de Xentinel.
+    oficial = await iniciarFastApi({ ...configGmail, SMTP_FROM: 'xentinel@test.example' });
+    const desdeOficial = await prueba(oficial.base);
+    assert.equal(desdeOficial.status, 200, JSON.stringify(desdeOficial.body));
+    assert.match(gmail.recibido.enviados.at(-1), /^From: Xentinel <xentinel@test\.example>$/m);
+    // Google revoca el access token guardado antes de vencer: se renueva y se reintenta una vez.
+    const renovaciones = gmail.recibido.tokens.length;
+    const entregados = gmail.recibido.enviados.length;
+    gmail.revocar();
+    const trasRevocar = await prueba(oficial.base);
+    assert.equal(trasRevocar.status, 200, JSON.stringify(trasRevocar.body));
+    assert.equal(gmail.recibido.tokens.length, renovaciones + 1);
+    assert.equal(gmail.recibido.enviados.length, entregados + 1);
+    // Una respuesta 200 sin id no cuenta como enviada.
+    gmail.google.sinId = true;
+    const sinConfirmar = await prueba(oficial.base);
+    assert.equal(sinConfirmar.status, 502);
+    assert.match(sinConfirmar.body.error.message, /GMAIL_SEND: Gmail no confirmó el envío/);
   } finally {
+    await oficial?.cerrar();
     await conGmail.cerrar();
-    await revocado.cerrar();
+    await revocado?.cerrar();
     await gmail.cerrar();
   }
 });

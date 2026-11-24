@@ -8,6 +8,10 @@ xentinel-privado/
 *.keystore
 *.pem
 key.properties
+# Credenciales de Google: el JSON del cliente OAuth y las cuentas de servicio de Firebase.
+client_secret*.json
+*firebase-adminsdk*.json
+*service-account*.json
 Xentinel.sql
 Xentinel app/config/demo.local.json
 Xentinel web/BackEnd/static/

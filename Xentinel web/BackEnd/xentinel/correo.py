@@ -10,6 +10,7 @@ from base64 import b64decode, b64encode, urlsafe_b64encode
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from email.message import EmailMessage
+from email.utils import formataddr, parseaddr
 from html import escape
 from urllib.error import HTTPError, URLError
 
@@ -17,7 +18,7 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from starlette.concurrency import run_in_threadpool
 
-from .google import pedir_json, token_gmail
+from .google import TOKEN_GMAIL, pedir_json, token_gmail
 
 LOG = logging.getLogger(__name__)
 # Último fallo de entrega en este proceso, para el diagnóstico de administración.
@@ -176,10 +177,14 @@ TEXTOS = {
 
 
 def remitente(config):
-    """Con Gmail API, un remitente de ejemplo se omite y Gmail usa la cuenta autorizada."""
-    if config.gmail and config.SMTP_FROM.lower().rstrip("> ").endswith("@example.com"):
+    """``From`` del correo: «Xentinel <cuenta>» con la cuenta de ``SMTP_FROM``.
+
+    Con Gmail API, un remitente de ejemplo se omite y Gmail usa la cuenta autorizada.
+    """
+    nombre, direccion = parseaddr(config.SMTP_FROM)
+    if not direccion or (config.gmail and direccion.lower().endswith("@example.com")):
         return None
-    return config.SMTP_FROM
+    return formataddr((nombre or "Xentinel", direccion))
 
 
 def mensaje_codigo(datos, config):
@@ -230,20 +235,41 @@ def mensaje_prueba(destino, config):
     return mensaje
 
 
-def enviar_gmail(mensaje, config):
+def acceso_gmail(config):
+    """Access token de Gmail, renovado con el refresh token cuando hace falta."""
     try:
-        token = token_gmail(config)
+        return token_gmail(config)
     except HTTPError as error:
         # invalid_grant: el refresh token venció o se revocó (en modo de prueba dura 7 días).
         raise FalloCorreo("GMAIL_AUTH", causa_http(error)) from None
-    try:
-        pedir_json(
-            f"{config.GMAIL_API_URL.rstrip('/')}/gmail/v1/users/me/messages/send",
-            cuerpo={"raw": urlsafe_b64encode(mensaje.as_bytes()).decode()},
-            token=token,
-        )
-    except HTTPError as error:
-        raise FalloCorreo("GMAIL_SEND", causa_http(error)) from None
+    except ValueError as error:
+        raise FalloCorreo("GMAIL_AUTH", str(error)) from None
+
+
+def enviar_gmail(mensaje, config):
+    """Envía por Gmail API y devuelve el id del mensaje que confirma Google."""
+    cuerpo = {"raw": urlsafe_b64encode(mensaje.as_bytes()).decode()}
+    url = f"{config.GMAIL_API_URL.rstrip('/')}/gmail/v1/users/me/messages/send"
+    for intento in (1, 2):
+        try:
+            respuesta = pedir_json(url, cuerpo=cuerpo, token=acceso_gmail(config))
+        except HTTPError as error:
+            # Un 401 con un token guardado significa que Google lo revocó antes de
+            # vencer: se pide uno nuevo con el refresh token y se reintenta una vez.
+            if error.code == 401 and intento == 1:
+                TOKEN_GMAIL.invalidar()
+                continue
+            raise FalloCorreo("GMAIL_SEND", causa_http(error)) from None
+        except ValueError:
+            raise FalloCorreo(
+                "GMAIL_SEND", "Gmail respondió algo que no es JSON"
+            ) from None
+        if not isinstance(respuesta, dict) or not respuesta.get("id"):
+            raise FalloCorreo(
+                "GMAIL_SEND", "Gmail no confirmó el envío: respuesta sin id"
+            )
+        return respuesta["id"]
+    raise AssertionError("inalcanzable")
 
 
 def transporte(config):
@@ -277,10 +303,7 @@ def verificar_correo(config):
     """Comprueba el transporte al iniciar; un fallo no tumba la API (la cola reintenta)."""
     try:
         if config.gmail:
-            try:
-                token_gmail(config)
-            except HTTPError as error:
-                raise FalloCorreo("GMAIL_AUTH", causa_http(error)) from None
+            acceso_gmail(config)
         else:
             with conectar_smtp(config):
                 pass

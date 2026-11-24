@@ -9,6 +9,8 @@ Xentinel envía dos tipos de código de 6 dígitos desde la cuenta de Gmail de X
 
 Los códigos vencen a los `RESET_TTL_MINUTES` (15), admiten 5 intentos y se piden 3 veces cada 15 minutos. Ambos viajan cifrados en la cola `mail_outbox`; un proceso de la API los entrega cada 2 segundos y reintenta con espera creciente.
 
+Con Gmail API, la API cambia el refresh token por un token de acceso de una hora y lo reutiliza hasta un minuto antes de que venza. Si Google rechaza ese token antes de tiempo (HTTP 401), pide uno nuevo y reintenta el envío una vez. Un mensaje solo cuenta como enviado cuando Gmail devuelve su id. El correo sale como `Xentinel <cuenta>` con la cuenta de `SMTP_FROM`.
+
 ## 1. Diagnóstico de la falla
 
 **Causa en producción.** Los registros de `xentinel-api` en Render repiten en cada arranque, desde el 17 de noviembre de 2026:
@@ -76,6 +78,8 @@ Responde «Correo de prueba enviado…» o «No se envió (CÓDIGO): causa».
 | `GMAIL_AUTH` + `invalid_client` / `unauthorized_client` | ID o secreto del cliente incorrectos | Copia de nuevo `GMAIL_CLIENT_ID` y `GMAIL_CLIENT_SECRET` |
 | `GMAIL_SEND` + `Insufficient Permission` | El token no tiene el alcance `gmail.send` | Repite el paso 4 con ese alcance |
 | `GMAIL_SEND` + `Invalid From header` | `SMTP_FROM` no es la cuenta ni un alias verificado | Usa la cuenta de Xentinel o quita `SMTP_FROM` |
+| `GMAIL_SEND` + `Gmail no confirmó el envío` | Google respondió sin el id del mensaje | La cola reintenta sola; si se repite, revisa el estado de Gmail API en Google Cloud |
+| `GMAIL_AUTH` + `sin access_token` | Google respondió al refresh token sin entregar un token de acceso | Genera otro refresh token (paso 4) |
 | `SMTP_AUTH` | Usuario o contraseña SMTP rechazados | Con Gmail, usa una contraseña de aplicación |
 | `TIMEOUT` / `CONNECTION` | No hay salida al servidor de correo | En Render gratis usa Gmail API: los puertos SMTP están bloqueados |
 | `MAIL_NOT_CONFIGURED` (503) | No hay transporte configurado | Paso 2 |
