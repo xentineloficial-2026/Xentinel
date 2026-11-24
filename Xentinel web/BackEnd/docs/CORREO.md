@@ -40,7 +40,7 @@ El plan gratis de Render bloquea los puertos SMTP, así que se usa Gmail API por
 5. En Render, `xentinel-api` → **Environment**, agrega `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET` y `GMAIL_REFRESH_TOKEN`. Opcional: `SMTP_FROM` = `Xentinel <cuenta-de-xentinel@gmail.com>`; debe ser la misma cuenta o un alias verificado.
 6. Guarda: Render reinicia el servicio. En **Logs** debe aparecer `Correo listo por gmail`. Si aparece `Correo no disponible (GMAIL_AUTH)`, revisa los pasos 2 a 4.
 
-Los tres valores son secretos: escríbelos solo en el panel de Render, nunca en el repositorio ni en un chat.
+Los tres valores son secretos: escríbelos solo en el panel de Render, nunca en el repositorio ni en un chat. La API quita los espacios, saltos de línea y comillas que se cuelan al pegarlos.
 
 ## 3. Probar el envío
 
@@ -74,8 +74,9 @@ Responde «Correo de prueba enviado…» o «No se envió (CÓDIGO): causa».
 
 | Código | Qué significa | Qué hacer |
 | --- | --- | --- |
-| `GMAIL_AUTH` + `invalid_grant` | El refresh token venció o se revocó | Publica la app en Google (paso 2) y genera otro refresh token (paso 4) |
-| `GMAIL_AUTH` + `invalid_client` / `unauthorized_client` | ID o secreto del cliente incorrectos | Copia de nuevo `GMAIL_CLIENT_ID` y `GMAIL_CLIENT_SECRET` |
+| `GMAIL_AUTH` + `invalid_grant` | El refresh token venció, se revocó o se generó con otro cliente (sin marcar «Use your own OAuth credentials» en el Playground) | Publica la app en Google (paso 2) y genera otro refresh token con este mismo cliente (paso 4) |
+| `GMAIL_AUTH` + `access token (ya29…)` | En `GMAIL_REFRESH_TOKEN` se pegó el access token | Copia el **Refresh token** (empieza por `1//`), no el access token |
+| `GMAIL_AUTH` + `invalid_client` / `unauthorized_client` | ID o secreto del cliente incorrectos (`The OAuth client was not found`: el ID no existe) | Copia de nuevo `GMAIL_CLIENT_ID` y `GMAIL_CLIENT_SECRET` desde el JSON del cliente |
 | `GMAIL_SEND` + `Insufficient Permission` | El token no tiene el alcance `gmail.send` | Repite el paso 4 con ese alcance |
 | `GMAIL_SEND` + `Invalid From header` | `SMTP_FROM` no es la cuenta ni un alias verificado | Usa la cuenta de Xentinel o quita `SMTP_FROM` |
 | `GMAIL_SEND` + `Gmail no confirmó el envío` | Google respondió sin el id del mensaje | La cola reintenta sola; si se repite, revisa el estado de Gmail API en Google Cloud |

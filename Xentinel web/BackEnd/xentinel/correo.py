@@ -235,13 +235,36 @@ def mensaje_prueba(destino, config):
     return mensaje
 
 
+PISTAS_GMAIL = {
+    "invalid_grant": (
+        "el refresh token no sirve con este cliente: genéralo otra vez en OAuth "
+        "Playground marcando «Use your own OAuth credentials» con este mismo cliente "
+        "y el alcance gmail.send"
+    ),
+    "invalid_client": (
+        "GMAIL_CLIENT_ID o GMAIL_CLIENT_SECRET no corresponden a un cliente OAuth: "
+        "cópialos de nuevo desde Google Cloud"
+    ),
+}
+
+
 def acceso_gmail(config):
     """Access token de Gmail, renovado con el refresh token cuando hace falta."""
+    if config.GMAIL_REFRESH_TOKEN.startswith("ya29."):
+        raise FalloCorreo(
+            "GMAIL_AUTH",
+            "GMAIL_REFRESH_TOKEN tiene un access token (ya29…): usa el refresh "
+            "token (empieza por 1//)",
+        )
     try:
         return token_gmail(config)
     except HTTPError as error:
-        # invalid_grant: el refresh token venció o se revocó (en modo de prueba dura 7 días).
-        raise FalloCorreo("GMAIL_AUTH", causa_http(error)) from None
+        # invalid_grant: el refresh token venció, se revocó o es de otro cliente.
+        causa = causa_http(error)
+        pista = next((p for clave, p in PISTAS_GMAIL.items() if clave in causa), "")
+        raise FalloCorreo(
+            "GMAIL_AUTH", f"{causa} ({pista})" if pista else causa
+        ) from None
     except ValueError as error:
         raise FalloCorreo("GMAIL_AUTH", str(error)) from None
 
