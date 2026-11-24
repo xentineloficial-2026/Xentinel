@@ -18,6 +18,7 @@ from . import (
     eventos,
     personas,
     programas,
+    riesgos,
     sismos,
 )
 from .base_datos import BaseDatos, verificar_esquema
@@ -86,6 +87,7 @@ def crear_aplicacion(configuracion=None):
         catalogos.reportes,
         alertas.rutas,
         alarmas.rutas,
+        riesgos.rutas,
         eventos.rutas,
     ):
         app.include_router(rutas, prefix="/api/v1")

@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 from starlette.concurrency import run_in_threadpool
 from websockets.asyncio.client import connect
 
-from . import push
+from . import push, semaforo
 from .correo import mantener
 from .google import pedir_json
 
@@ -27,6 +27,8 @@ RADIO_TIERRA_KM = 6371.0088
 # El mismo sismo informado por dos agencias: menos de 2 minutos y 50 km de diferencia.
 VENTANA_DUPLICADO = timedelta(minutes=2)
 DISTANCIA_DUPLICADO_KM = 50
+# Sismos simulados desde la API de riesgos: nunca se agrupan con reportes reales.
+FUENTE_PRUEBA = "PRUEBA"
 
 
 @dataclass(frozen=True)
@@ -112,6 +114,38 @@ def severidad(magnitud, distancia):
     return "informativa"
 
 
+def evaluar(config, magnitud, latitud, longitud):
+    """Evaluación de riesgo de un sismo para la sede, sin guardar nada.
+
+    ``genera_alarma`` es verdadero solo para rojo o amarillo dentro del radio vigilado y
+    desde la magnitud mínima; ``motivo`` explica por qué no, cuando no la genera.
+    """
+    distancia = distancia_km(config.SEISMIC_LAT, config.SEISMIC_LON, latitud, longitud)
+    nivel = severidad(magnitud, distancia)
+    color = semaforo.de_severidad(nivel)
+    motivo = None
+    if distancia > config.SEISMIC_RADIUS_KM:
+        motivo = (
+            f"Está a {distancia:.0f} km, fuera del radio vigilado de "
+            f"{config.SEISMIC_RADIUS_KM:.0f} km."
+        )
+    elif magnitud < config.SEISMIC_MIN_MAGNITUDE:
+        motivo = (
+            f"La magnitud {magnitud:.1f} es menor que la mínima vigilada "
+            f"({config.SEISMIC_MIN_MAGNITUDE:.1f})."
+        )
+    elif color not in semaforo.ALARMA:
+        motivo = "Riesgo normal (verde): se registra, pero no genera alarma."
+    return {
+        "distancia_km": round(distancia, 1),
+        "severidad": nivel,
+        "semaforo": color,
+        "dentro_del_radio": distancia <= config.SEISMIC_RADIUS_KM,
+        "genera_alarma": motivo is None,
+        "motivo": motivo,
+    }
+
+
 def mensaje_alerta(sismo, distancia, zona):
     hora = sismo.ocurrido_en.astimezone(ZoneInfo(zona)).strftime("%H:%M")
     profundidad = (
@@ -119,17 +153,27 @@ def mensaje_alerta(sismo, distancia, zona):
         if sismo.profundidad_km is None
         else f", profundidad {sismo.profundidad_km:.0f} km"
     )
+    origen = (
+        "Simulacro generado desde la API de gestión de riesgos"
+        if sismo.fuente == FUENTE_PRUEBA
+        else f"Reportado por {sismo.fuente}"
+    )
     return (
+        f"{'SIMULACRO. ' if sismo.fuente == FUENTE_PRUEBA else ''}"
         f"Sismo de magnitud {sismo.magnitud:.1f} ({sismo.lugar}) a {distancia:.0f} km de la "
-        f"sede{profundidad}, a las {hora} hora local. Reportado por {sismo.fuente}. "
+        f"sede{profundidad}, a las {hora} hora local. {origen}. "
         "Agáchate, cúbrete y sujétate. Si estás al aire libre, aléjate de edificios, postes "
         "y cables; después sigue las indicaciones del personal."
     )
 
 
 def registrar(base, config, sismo, ahora=None):
-    """Guarda el sismo y crea su alerta. None si no aplica o ya se alertó ese sismo."""
+    """Guarda el sismo y crea su alerta si el semáforo es rojo o amarillo.
+
+    None si no aplica, si es verde (se guarda sin alerta) o si ya se alertó ese sismo.
+    """
     ahora = ahora or datetime.now(UTC)
+    evaluacion = evaluar(config, sismo.magnitud, sismo.latitud, sismo.longitud)
     distancia = distancia_km(
         config.SEISMIC_LAT, config.SEISMIC_LON, sismo.latitud, sismo.longitud
     )
@@ -140,6 +184,8 @@ def registrar(base, config, sismo, ahora=None):
         or sismo.ocurrido_en > ahora + timedelta(minutes=10)
     ):
         return None
+    alarma = evaluacion["semaforo"] in semaforo.ALARMA
+    prueba = sismo.fuente == FUENTE_PRUEBA
     with base.transaccion() as db:
         # EMSC y USGS llegan en paralelo: un solo registro a la vez decide si es nuevo.
         db.ejecutar("SELECT pg_advisory_xact_lock(91734203)")
@@ -149,11 +195,16 @@ def registrar(base, config, sismo, ahora=None):
             sismo.evento_id,
         ):
             return None
-        cercanos = db.filas(
-            """SELECT latitud,longitud,id_alerta FROM sismos_detectados
-            WHERE ocurrido_en BETWEEN %s AND %s ORDER BY id_sismo""",
-            sismo.ocurrido_en - VENTANA_DUPLICADO,
-            sismo.ocurrido_en + VENTANA_DUPLICADO,
+        cercanos = (
+            []
+            if prueba
+            else db.filas(
+                """SELECT latitud,longitud,id_alerta FROM sismos_detectados
+                WHERE ocurrido_en BETWEEN %s AND %s AND fuente<>%s ORDER BY id_sismo""",
+                sismo.ocurrido_en - VENTANA_DUPLICADO,
+                sismo.ocurrido_en + VENTANA_DUPLICADO,
+                FUENTE_PRUEBA,
+            )
         )
         mismo = next(
             (
@@ -170,12 +221,14 @@ def registrar(base, config, sismo, ahora=None):
             None,
         )
         alerta = None
-        if not mismo:
+        # Un sismo verde se guarda sin alerta. Si otra agencia lo reporta después con un
+        # nivel de alarma (p. ej. una magnitud corregida), ahí sí se crea la alerta.
+        if alarma and (not mismo or mismo["id_alerta"] is None):
             alerta = db.fila(
                 """INSERT INTO alertas_emergencia(tipo_alerta,mensaje,severidad,fuente,
                 referencia_externa,emisor_id) VALUES('Sismo',%s,%s,%s,%s,NULL) RETURNING *""",
                 mensaje_alerta(sismo, distancia, config.ZONA_HORARIA),
-                severidad(sismo.magnitud, distancia),
+                evaluacion["severidad"],
                 sismo.fuente,
                 sismo.evento_id,
             )
@@ -192,7 +245,7 @@ def registrar(base, config, sismo, ahora=None):
             None if sismo.profundidad_km is None else round(sismo.profundidad_km, 1),
             round(distancia, 1),
             sismo.ocurrido_en,
-            alerta["id_alerta"] if alerta else mismo["id_alerta"],
+            alerta["id_alerta"] if alerta else (mismo or {}).get("id_alerta"),
         )
     return {"alerta": alerta, "distancia": distancia} if alerta else None
 
