@@ -6,6 +6,8 @@ import '../core/api_config.dart';
 import '../core/errors.dart';
 import '../core/session.dart';
 import '../models/emergency_alert.dart';
+import '../models/scan_alarm.dart';
+import '../models/xentinel_models.dart';
 import '../repositories/alerts_repository.dart';
 import '../services/alert_events.dart';
 import '../services/network_status.dart';
@@ -60,6 +62,10 @@ class AlertsMonitor extends ChangeNotifier {
   final Random _random;
 
   List<EmergencyAlert> alerts = const [];
+
+  /// Carnets QR vencidos o que no son verídicos, pendientes de revisar. Solo para el
+  /// personal de control y la administración.
+  List<ScanAlarm> scanAlarms = const [];
   DateTime? lastUpdated;
   String? error;
   bool connected = false;
@@ -84,6 +90,26 @@ class AlertsMonitor extends ChangeNotifier {
   StreamSubscription<void>? _networkSubscription;
 
   bool get online => network?.online ?? true;
+
+  /// El personal de control y la administración también ven las alarmas de escaneo.
+  bool get includesScans =>
+      session.user?.role == UserRole.guardia ||
+      session.user?.role == UserRole.administrador;
+
+  /// Alarmas por color del semáforo (riesgos y escaneos).
+  int countOf(Semaforo color) =>
+      alerts.where((alert) => alert.semaforo == color).length +
+      scanAlarms.where((alarm) => alarm.semaforo == color).length;
+
+  /// Marca una alarma de escaneo como revisada y la quita de la lista.
+  Future<void> attendScan(ScanAlarm alarm) async {
+    await repository.attendScanAlarm(alarm.id);
+    if (_closed) return;
+    scanAlarms = List.unmodifiable(
+      scanAlarms.where((item) => item.id != alarm.id),
+    );
+    notifyListeners();
+  }
 
   LinkState get linkState {
     if (!online) return LinkState.offline;
@@ -162,6 +188,16 @@ class AlertsMonitor extends ChangeNotifier {
       final result = await repository.fetchActive();
       if (_closed) return;
       alerts = result;
+      if (includesScans) {
+        try {
+          scanAlarms = await repository.fetchScanAlarms();
+        } catch (_) {
+          // Sin la lista de escaneos, las alarmas de riesgo siguen al día.
+        }
+      } else {
+        scanAlarms = const [];
+      }
+      if (_closed) return;
       lastUpdated = DateTime.now();
       error = null;
       _failures = 0;
@@ -250,7 +286,10 @@ class AlertsMonitor extends ChangeNotifier {
       return;
     }
     if (event.type == 'change' &&
-        event.data['recurso'] == 'alertas_emergencia') {
+        const {
+          'alertas_emergencia',
+          'alarmas_qr',
+        }.contains(event.data['recurso'])) {
       unawaited(refresh());
     }
     // Con el canal en vivo la consulta periódica pasa a ser una red de seguridad.

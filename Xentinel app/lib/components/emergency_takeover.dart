@@ -26,7 +26,8 @@ class EmergencyTakeover extends StatelessWidget {
     final primaryFg = moderate ? Colors.white : XentinelTheme.emergencyDeep;
     final secondaryBg = moderate ? Colors.white : XentinelTheme.emergencyDeep;
     final secondaryFg = moderate ? XentinelTheme.ink : Colors.white;
-    final isDrill = alert.type.toLowerCase().contains('simulacro');
+    // También los simulacros de la API de riesgos (fuente PRUEBA), como en la web.
+    final isDrill = alert.isDrill;
     final date = alert.startedAt.toLocal();
     final time =
         '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';

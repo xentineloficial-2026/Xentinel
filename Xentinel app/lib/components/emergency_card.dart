@@ -75,7 +75,12 @@ class EmergencyCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 18),
-            Text(alert.source, style: const TextStyle(height: 1.4)),
+            Text(
+              alert.source == 'PRUEBA'
+                  ? 'Simulacro de la API de gestión de riesgos'
+                  : alert.source,
+              style: const TextStyle(height: 1.4),
+            ),
             Text(
               time,
               style: TextStyle(
