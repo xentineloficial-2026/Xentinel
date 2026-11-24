@@ -65,6 +65,8 @@ Opcion B - Base vacia:
 
   2.5 Comprobar: abre http://127.0.0.1:8000/ready
       Debe responder {"status":"ready"}.
+      Correo (opcional): .\.venv\Scripts\python.exe -m xentinel probar-correo tu@correo.com
+      Guias de pruebas: docs\RIESGOS.md (alarmas y riesgos) y docs\CORREO.md.
 
   2.6 (Solo con base vacia) Crear el primer administrador.
       En PowerShell, con el servidor detenido o en otra terminal:
