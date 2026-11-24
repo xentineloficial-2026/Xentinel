@@ -12,102 +12,36 @@ bool motionEnabled(BuildContext context) =>
     !MediaQuery.disableAnimationsOf(context) &&
     !Platform.environment.containsKey('FLUTTER_TEST');
 
-/// El logo con volumen: capas apiladas en perspectiva, un vaivén lento y un
-/// brillo metálico que lo recorre. Es el mismo escudo 3D de la portada web.
-class Shield3D extends StatefulWidget {
-  const Shield3D({super.key, this.size = 120});
+/// La X oficial con una franja de luz que la recorre en diagonal, como el haz de un
+/// escáner. [progress] va de 0 a 1; en los extremos la X queda plana y quieta.
+class SheenMark extends StatelessWidget {
+  const SheenMark({super.key, required this.size, required this.progress});
   final double size;
-
-  @override
-  State<Shield3D> createState() => _Shield3DState();
-}
-
-class _Shield3DState extends State<Shield3D>
-    with SingleTickerProviderStateMixin {
-  late final _controller = AnimationController(
-    vsync: this,
-    duration: const Duration(seconds: 7),
-  );
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (motionEnabled(context) && !_controller.isAnimating) {
-      _controller.repeat();
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
+  final double progress;
 
   @override
   Widget build(BuildContext context) {
-    const layers = 12;
-    final depth = widget.size * 0.012;
-    return Semantics(
-      label: 'Xentinel',
-      image: true,
-      child: ExcludeSemantics(
-        child: RepaintBoundary(
-          child: AnimatedBuilder(
-            animation: _controller,
-            builder: (context, _) {
-              final t = _controller.value * 2 * math.pi;
-              Matrix4 pose(double z) => Matrix4.identity()
-                ..setEntry(3, 2, 0.0014)
-                ..rotateY(math.sin(t) * 0.42)
-                ..rotateX(math.cos(t) * 0.07)
-                ..translateByDouble(0.0, 0.0, z, 1.0);
-              return Stack(
-                alignment: Alignment.center,
-                children: [
-                  for (var i = layers; i > 0; i--)
-                    Transform(
-                      alignment: Alignment.center,
-                      transform: pose(i * depth),
-                      child: XentinelLogo(
-                        size: widget.size,
-                        color: Color.lerp(
-                          XentinelTheme.steel,
-                          XentinelTheme.slate,
-                          i / layers,
-                        )!,
-                      ),
-                    ),
-                  Transform(
-                    alignment: Alignment.center,
-                    transform: pose(0),
-                    child: ShaderMask(
-                      blendMode: BlendMode.srcIn,
-                      shaderCallback: (bounds) {
-                        final sheen = _controller.value * 3 - 1;
-                        return LinearGradient(
-                          begin: Alignment(sheen - 1, -1),
-                          end: Alignment(sheen + 1, 1),
-                          colors: const [
-                            XentinelTheme.steel,
-                            Colors.white,
-                            XentinelTheme.mist,
-                            XentinelTheme.steel,
-                          ],
-                          stops: const [0, 0.42, 0.58, 1],
-                        ).createShader(bounds);
-                      },
-                      child: XentinelLogo(
-                        size: widget.size,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
-        ),
-      ),
+    if (progress <= 0 || progress >= 1) {
+      return XentinelLogo(size: size, color: XentinelTheme.text);
+    }
+    return ShaderMask(
+      blendMode: BlendMode.srcIn,
+      shaderCallback: (bounds) {
+        // La franja entra por la izquierda, cruza la hoja larga y sale por la derecha.
+        final x = progress * 3.4 - 1.7;
+        return LinearGradient(
+          begin: Alignment(x - 1, -1),
+          end: Alignment(x + 1, 1),
+          colors: const [
+            XentinelTheme.text,
+            Colors.white,
+            XentinelTheme.steel,
+            XentinelTheme.text,
+          ],
+          stops: const [0.34, 0.48, 0.56, 0.70],
+        ).createShader(bounds);
+      },
+      child: XentinelLogo(size: size, color: Colors.white),
     );
   }
 }

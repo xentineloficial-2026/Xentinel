@@ -9,8 +9,6 @@ import '../core/session.dart';
 import '../core/theme.dart';
 
 import '../providers/auth_provider.dart';
-import '../services/biometric_service.dart';
-import '../services/credential_store.dart';
 import '../services/server_settings.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -20,13 +18,68 @@ class LoginScreen extends ConsumerStatefulWidget {
   ConsumerState<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends ConsumerState<LoginScreen> {
+class _LoginScreenState extends ConsumerState<LoginScreen>
+    with SingleTickerProviderStateMixin {
+  /// La apertura se ve una vez por arranque de la app, no al volver tras cerrar sesión.
+  static bool _openingShown = false;
+
+  /// Alto de la X al arrancar: el mismo del arranque de Android 12+ (icono adaptable).
+  static const _splashMarkWidth = 117.0;
+  static const _headerMarkWidth = 58.0;
+
   final _docController = TextEditingController();
   final _passController = TextEditingController();
+  final _markSlot = GlobalKey();
+  late final AnimationController _opening = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1600),
+  );
+
+  /// Distancia del centro de la pantalla al lugar final de la X.
+  Offset _markTravel = Offset.zero;
+
+  /// Hasta medir su destino y tener la imagen lista, la X no se dibuja: nunca salta.
+  bool _measuring = false;
   bool _obscure = true;
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_opening.status != AnimationStatus.dismissed) return;
+    if (_openingShown || !motionEnabled(context)) {
+      _opening.value = 1;
+      return;
+    }
+    _openingShown = true;
+    _measuring = true;
+    // Se mide el lugar de la X en el primer cuadro y luego se anima hacia él. La
+    // imagen se decodifica antes de mostrarla: así la X del arranque nativo nunca
+    // desaparece, ni por un instante, al pasar a Flutter.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final ready = precacheImage(
+        const AssetImage(XentinelLogo.asset),
+        context,
+      );
+      final box = _markSlot.currentContext?.findRenderObject() as RenderBox?;
+      final screen = MediaQuery.sizeOf(context);
+      final travel = box != null && box.hasSize
+          ? Offset(screen.width / 2, screen.height / 2) -
+                box.localToGlobal(box.size.center(Offset.zero))
+          : Offset.zero;
+      await ready;
+      if (!mounted) return;
+      setState(() {
+        _markTravel = travel;
+        _measuring = false;
+      });
+      _opening.forward();
+    });
+  }
+
+  @override
   void dispose() {
+    _opening.dispose();
     _docController.dispose();
     _passController.dispose();
     super.dispose();
@@ -44,22 +97,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     }
   }
 
-  /// El carnet guardado se muestra sin internet, protegido por la biometría o el
-  /// PIN del teléfono.
-  Future<void> _openOfflineCarnet() async {
-    final verified = await ref.read(biometricServiceProvider).authenticate();
-    if (!mounted) return;
-    if (!verified) {
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(content: Text('Verificación biométrica cancelada.')),
-        );
-      return;
-    }
-    context.push('/carnet-offline');
-  }
-
   Future<void> _editServer() async {
     final saved = await showDialog<bool>(
       context: context,
@@ -71,70 +108,113 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final loading = ref.watch(authControllerProvider).isLoading;
-    final offlineCarnet = ref.watch(
-      credentialStoreProvider.select(
-        (store) => store.current?.isUsableAt(DateTime.now()) ?? false,
-      ),
-    );
     final server = Uri.tryParse(ApiConfig.baseUrl)?.authority ?? '';
     final sessionMessage = ref.watch(sessionProvider).message;
 
     return Scaffold(
-      body: Stack(
-        children: [
-          const Positioned.fill(child: FacetBackdrop()),
-          SafeArea(
-            child: Center(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 24,
-                ),
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 440),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      const Center(child: Shield3D(size: 104)),
-                      const SizedBox(height: 14),
-                      const Text(
-                        'Xentinel',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: -0.4,
-                        ),
-                      ),
-                      const SizedBox(height: 28),
-                      Entrance(
-                        child: GlassPanel(
-                          child: _form(
-                            loading,
-                            sessionMessage,
-                            server,
-                            offlineCarnet,
+      body: AnimatedBuilder(
+        animation: _opening,
+        builder: (context, _) {
+          final t = _opening.value;
+          // Un solo momento coreografiado, en tres tiempos que se solapan:
+          // 1. un haz de luz recorre la X, quieta en el centro como el arranque nativo;
+          // 2. la X sube a su lugar y se achica mientras aparecen las facetas;
+          // 3. el nombre y el formulario entran desde abajo.
+          final sheen = const Interval(
+            0.04,
+            0.42,
+            curve: Curves.easeInOut,
+          ).transform(t);
+          final settle = const Interval(
+            0.34,
+            0.72,
+            curve: Curves.easeInOutCubic,
+          ).transform(t);
+          final content = const Interval(
+            0.58,
+            1,
+            curve: Curves.easeOutCubic,
+          ).transform(t);
+          final markWidth =
+              _splashMarkWidth + (_headerMarkWidth - _splashMarkWidth) * settle;
+          return Stack(
+            children: [
+              Positioned.fill(
+                child: Opacity(opacity: settle, child: const FacetBackdrop()),
+              ),
+              SafeArea(
+                child: Center(
+                  child: SingleChildScrollView(
+                    // Durante la apertura la X viaja fuera del bloque: sin recorte.
+                    clipBehavior: t < 1 ? Clip.none : Clip.hardEdge,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 24,
+                    ),
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 440),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Center(
+                            child: SizedBox(
+                              key: _markSlot,
+                              width: _headerMarkWidth,
+                              height:
+                                  _headerMarkWidth * XentinelLogo.aspectRatio,
+                              child: OverflowBox(
+                                maxWidth: _splashMarkWidth,
+                                maxHeight:
+                                    _splashMarkWidth * XentinelLogo.aspectRatio,
+                                child: Opacity(
+                                  opacity: _measuring ? 0 : 1,
+                                  child: Transform.translate(
+                                    offset: _markTravel * (1 - settle),
+                                    child: SheenMark(
+                                      size: markWidth,
+                                      progress: sheen,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
                           ),
-                        ),
+                          const SizedBox(height: 14),
+                          _Rising(
+                            value: content,
+                            child: const Text(
+                              'Xentinel',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: -0.4,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 28),
+                          _Rising(
+                            value: const Interval(0.15, 1).transform(content),
+                            distance: 28,
+                            child: GlassPanel(
+                              child: _form(loading, sessionMessage, server),
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
-        ],
+            ],
+          );
+        },
       ),
     );
   }
 
-  Widget _form(
-    bool loading,
-    String? sessionMessage,
-    String server,
-    bool offlineCarnet,
-  ) => Column(
+  Widget _form(bool loading, String? sessionMessage, String server) => Column(
     mainAxisSize: MainAxisSize.min,
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
@@ -204,14 +284,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         onPressed: loading ? null : () => context.push('/forgot-password'),
         child: const Text('¿Olvidaste tu contraseña?'),
       ),
-      if (offlineCarnet) ...[
-        const SizedBox(height: 4),
-        OutlinedButton.icon(
-          onPressed: loading ? null : _openOfflineCarnet,
-          icon: const Icon(Icons.qr_code_2),
-          label: const Text('Mostrar mi carnet sin conexión'),
-        ),
-      ],
       if (ApiConfig.allowServerOverride)
         TextButton.icon(
           onPressed: loading ? null : _editServer,
@@ -227,6 +299,23 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           ),
         ),
     ],
+  );
+}
+
+/// Bloque que sube y aparece según [value] (0 a 1), dentro de la apertura del login.
+class _Rising extends StatelessWidget {
+  const _Rising({required this.value, required this.child, this.distance = 16});
+  final double value;
+  final double distance;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Opacity(
+    opacity: value,
+    child: Transform.translate(
+      offset: Offset(0, (1 - value) * distance),
+      child: child,
+    ),
   );
 }
 

@@ -4,25 +4,35 @@ import 'package:flutter/material.dart';
 
 import '../core/theme.dart';
 
-/// Escudo con candado y llave, trazado en vector desde el logo oficial.
-/// Usa los mismos trazos que la web (simbolo-xentinel.svg).
+/// Logo oficial de Xentinel: la X. Es el mismo trazo del icono de la app y de la web
+/// (simbolo-x.png) y toma el color indicado para funcionar sobre cualquier fondo.
 class XentinelLogo extends StatelessWidget {
   const XentinelLogo({
     super.key,
     this.size = 40,
     this.color = XentinelTheme.mist,
   });
+
+  /// Ancho del logo; el alto conserva la proporción original.
   final double size;
   final Color color;
+
+  static const asset = 'assets/images/xentinel-x.png';
+  static const aspectRatio = 1116 / 1028;
 
   @override
   Widget build(BuildContext context) => Semantics(
     label: 'Xentinel',
     image: true,
-    child: SizedBox(
+    child: Image.asset(
+      asset,
       width: size,
-      height: size * 406 / 368,
-      child: CustomPaint(painter: _LogoPainter(color)),
+      height: size * aspectRatio,
+      color: color,
+      colorBlendMode: BlendMode.srcIn,
+      filterQuality: FilterQuality.medium,
+      excludeFromSemantics: true,
+      gaplessPlayback: true,
     ),
   );
 }
@@ -34,87 +44,6 @@ Path _shieldOutline(double x, double y) => Path()
   ..relativeCubicTo(-118, -58, -177, -173, -171, -306)
   ..relativeCubicTo(62, -9, 127, -37, 171, -74)
   ..close();
-
-class _LogoPainter extends CustomPainter {
-  const _LogoPainter(this.color);
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final scale = size.width / 368;
-    canvas
-      ..scale(scale)
-      ..translate(-118, -50);
-    final fill = Paint()
-      ..color = color
-      ..isAntiAlias = true;
-
-    final inner = Path()
-      ..moveTo(302, 93)
-      ..relativeCubicTo(-43, 33, -98, 57, -147, 64)
-      ..relativeCubicTo(-3, 108, 49, 203, 147, 259)
-      ..relativeCubicTo(98, -56, 150, -151, 147, -259)
-      ..relativeCubicTo(-49, -7, -104, -31, -147, -64)
-      ..close();
-    canvas.drawPath(
-      Path.combine(PathOperation.difference, _shieldOutline(302, 63), inner),
-      fill,
-    );
-
-    final shackle = Path()
-      ..moveTo(272, 224)
-      ..relativeLineTo(0, -34)
-      ..relativeCubicTo(0, -22, 15, -34, 32, -34)
-      ..relativeCubicTo(18, 0, 32, 14, 34, 40);
-    canvas.drawPath(
-      shackle,
-      Paint()
-        ..color = color
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 19
-        ..strokeCap = StrokeCap.round,
-    );
-
-    final body = Path()
-      ..addRRect(
-        RRect.fromRectAndRadius(
-          const Rect.fromLTWH(240, 217, 122, 93),
-          const Radius.circular(12),
-        ),
-      );
-    final keyhole = Path()
-      ..addOval(Rect.fromCircle(center: const Offset(301, 250), radius: 14))
-      ..moveTo(294, 260)
-      ..lineTo(290, 286)
-      ..lineTo(312, 286)
-      ..lineTo(308, 260)
-      ..close();
-    canvas.drawPath(
-      Path.combine(PathOperation.difference, body, keyhole),
-      fill,
-    );
-
-    final key = Path()
-      ..moveTo(283, 306)
-      ..relativeLineTo(27, 0)
-      ..relativeLineTo(0, 10)
-      ..relativeLineTo(17, 4)
-      ..relativeLineTo(0, 10)
-      ..relativeLineTo(-13, 4)
-      ..relativeLineTo(0, 6)
-      ..relativeLineTo(8, 2)
-      ..relativeLineTo(0, 9)
-      ..relativeLineTo(-12, 4)
-      ..relativeLineTo(0, 13)
-      ..relativeLineTo(-12, 13)
-      ..relativeLineTo(-15, -16)
-      ..close();
-    canvas.drawPath(key, fill);
-  }
-
-  @override
-  bool shouldRepaint(_LogoPainter oldDelegate) => oldDelegate.color != color;
-}
 
 /// Motivo de marca: el contorno del escudo repetido hacia afuera, como un
 /// perímetro que se extiende. Es el mismo fondo de la portada web.
