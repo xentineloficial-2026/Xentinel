@@ -1,7 +1,14 @@
 /** Diálogo nativo modal: foco atrapado, Escape, fondo inerte y restauración del foco al cerrar. */
 import { useEffect as useEfecto, useRef as useReferencia } from 'react';
 import { X as Cerrar } from 'lucide-react';
-function Dialogo({ titulo, children: contenido, alCerrar, ocupado = false }) {
+/** estrecho: formularios cortos (contraseña, correo), sin líneas de lectura demasiado largas. */
+function Dialogo({
+  titulo,
+  children: contenido,
+  alCerrar,
+  ocupado = false,
+  estrecho = false,
+}) {
   /* referencia: referencia estable entre renderizados, sin disparar una actualización visual. */
   const referencia = useReferencia(null);
   useEfecto(() => {
@@ -19,7 +26,7 @@ function Dialogo({ titulo, children: contenido, alCerrar, ocupado = false }) {
   return (
     <dialog
       ref={referencia}
-      className="xn-dialogo"
+      className={`xn-dialogo${estrecho ? ' xn-dialogo--estrecho' : ''}`}
       aria-labelledby="dialog-title"
       onCancel={(evento) => {
         evento.preventDefault();

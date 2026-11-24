@@ -18,10 +18,11 @@ import { formatearFecha } from '../utilidades/tablas.js';
 import { severidadDe } from '../ganchos/useInterrupcion.js';
 import { sonarSirena } from '../utilidades/sirena.js';
 
+/* Mismo semáforo que la app y la API: rojo para crítica o alta, amarillo para moderada. */
 const ETIQUETAS = {
-  critica: 'Alerta crítica',
-  alta: 'Alerta alta',
-  moderada: 'Alerta moderada',
+  critica: 'Alerta roja (crítica)',
+  alta: 'Alerta roja (alta)',
+  moderada: 'Alerta amarilla (moderada)',
 };
 
 export function InterrupcionEmergencia({ alerta, alAtender, base }) {
@@ -30,7 +31,9 @@ export function InterrupcionEmergencia({ alerta, alAtender, base }) {
   const principal = useReferencia(null);
   const [sos, cambiarSos] = useEstado({ estado: 'inactivo' });
   const severidad = severidadDe(alerta);
-  const esSimulacro = /simulacro/i.test(alerta.tipo_alerta);
+  /* Los simulacros de la API de riesgos llegan como «Sismo» con fuente PRUEBA. */
+  const esSimulacro =
+    /simulacro/i.test(alerta.tipo_alerta) || alerta.fuente === 'PRUEBA';
   /* Sirena al aparecer el aviso; se detiene al atenderlo. */
   useEfecto(() => sonarSirena(), []);
   useEfecto(() => {

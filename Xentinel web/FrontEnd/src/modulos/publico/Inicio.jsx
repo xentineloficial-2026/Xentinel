@@ -5,7 +5,6 @@ import {
   useState as useEstado,
 } from 'react';
 import {
-  ArrowRight as FlechaDerecha,
   ArrowUpRight as FlechaDiagonal,
   Clock as Reloj,
   FileSpreadsheet as Reporte,
@@ -16,10 +15,8 @@ import {
   TriangleAlert as Triangulo,
   UsersRound as Personas,
 } from 'lucide-react';
-import { Link as Enlace } from 'react-router-dom';
 import { useAutenticacion } from '../../compartido/contextos/autenticacion.js';
 import { useTema } from '../../compartido/contextos/tema.js';
-import { inicioParaUsuario } from '../../configuracion/navegacion.js';
 import { EscenaPrincipal } from '../../compartido/visual/EscenaPrincipal.jsx';
 import { FondoFacetas } from '../../compartido/visual/FondoFacetas.jsx';
 import { Perimetro } from '../../compartido/identidad/Perimetro.jsx';
@@ -59,15 +56,7 @@ function CapituloEscudo({ usuario }) {
               Un entorno conectado.
             </h1>
           </div>
-          <div className="xn-cine-acciones">
-            <Enlace className="xn-boton" to={inicioParaUsuario(usuario)}>
-              {usuario ? 'Volver a mi espacio' : 'Ingresar a Xentinel'}
-              <FlechaDiagonal size={18} />
-            </Enlace>
-            <a className="xn-texto-enlace" href="#capitulos">
-              Conoce cómo funciona <FlechaDerecha size={17} />
-            </a>
-          </div>
+          {/* El acceso vive solo en la barra superior: aquí no se repite. */}
         </div>
         <p className="xn-cine-paso xn-cine-paso--uno">
           Tu teléfono
@@ -136,7 +125,7 @@ function CapituloFunciones() {
           </p>
           <div className="xn-bento-estados" aria-hidden="true">
             <span className="si">Presente · 06:58</span>
-            <span className="tarde">Retrasado · 07:12</span>
+            <span className="tarde">Retardo · 07:12</span>
             <span>Sin registro</span>
           </div>
         </article>

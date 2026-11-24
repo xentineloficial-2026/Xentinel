@@ -85,7 +85,8 @@ test('la frecuencia por periodo exporta el resumen y el historial del aprendiz',
     numero_documento: '1001',
     dias: 4,
     presentes: 2,
-    retrasos: 1,
+    retardos: 1,
+    ausentes: 0,
     sin_registro: 1,
     asistencia: 75,
     puntualidad: 67,
@@ -97,13 +98,19 @@ test('la frecuencia por periodo exporta el resumen y el historial del aprendiz',
     resumen: [persona],
   };
   const resumen = reporteAsistenciaPeriodo({ ...base, detalle: [] });
-  assert.equal(resumen.filas[0][8], 67);
+  assert.deepEqual(resumen.columnas.slice(4, 8), [
+    'Presente',
+    'Retardo',
+    'Ausente',
+    'Sin registro',
+  ]);
+  assert.deepEqual(resumen.filas[0].slice(4, 10), [2, 1, 0, 1, 75, 67]);
   const historial = reporteAsistenciaPeriodo({
     ...base,
     persona,
-    detalle: [{ fecha: '2026-11-02', estado_asistencia: 'Retrasado' }],
+    detalle: [{ fecha: '2026-11-02', estado_asistencia: 'Retardo' }],
   });
-  assert.deepEqual(historial.filas[0], ['2026-11-02', '', '', 'Retrasado']);
+  assert.deepEqual(historial.filas[0], ['2026-11-02', '', '', 'Retardo']);
 });
 
 test('Excel abre como .xlsx y conserva valores con formato de texto', async () => {
