@@ -1484,7 +1484,8 @@ async function gmailSimulado() {
     if (peticion.url === '/token') {
       const formulario = new URLSearchParams(texto);
       recibido.tokens.push(formulario.get('grant_type'));
-      if (formulario.get('refresh_token') === 'revocado')
+      // Google no recorta: un token pegado con espacios o comillas es inválido.
+      if (formulario.get('refresh_token') === 'revocado' || /[\s"']/.test(formulario.get('refresh_token')))
         return responderJson(400, { error: 'invalid_grant', error_description: 'Token has been expired or revoked.' });
       google.emitidos += 1;
       return responderJson(200, { access_token: `gmail-simulado-${google.emitidos}`, expires_in: 3600 });
@@ -1551,6 +1552,7 @@ test('correo por Gmail API: diagnóstico, prueba de envío, causa exacta del fal
     assert.equal(fallida.status, 502);
     assert.equal(fallida.body.error.code, 'MAIL_DELIVERY_FAILED');
     assert.match(fallida.body.error.message, /GMAIL_AUTH: HTTP 400 invalid_grant: Token has been expired or revoked/);
+    assert.match(fallida.body.error.message, /Use your own OAuth credentials/);
     assert.ok(!fallida.body.error.message.includes('secreto-de-prueba'));
     await revocado.cerrar();
     revocado = null;
@@ -1575,7 +1577,12 @@ test('correo por Gmail API: diagnóstico, prueba de envío, causa exacta del fal
     assert.equal(cola.payload_encrypted, null);
 
     // Con SMTP_FROM de la cuenta oficial, el correo sale a nombre de Xentinel.
-    oficial = await iniciarFastApi({ ...configGmail, SMTP_FROM: 'xentinel@test.example' });
+    // Valores pegados con espacios, comillas y salto de línea, como suele pasar en un panel.
+    oficial = await iniciarFastApi({
+      ...configGmail,
+      SMTP_FROM: ' "xentinel@test.example" ',
+      GMAIL_REFRESH_TOKEN: ' "refresco-valido"\n',
+    });
     const desdeOficial = await prueba(oficial.base);
     assert.equal(desdeOficial.status, 200, JSON.stringify(desdeOficial.body));
     assert.match(gmail.recibido.enviados.at(-1), /^From: Xentinel <xentinel@test\.example>$/m);
