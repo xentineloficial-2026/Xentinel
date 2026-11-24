@@ -4,86 +4,338 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="referrer" content="no-referrer" />
-    <title>Lleva Xentinel contigo</title>
+    <meta
+      name="description"
+      content="Descarga la app oficial de Xentinel para Android: carnet digital, escáner de acceso y alarmas de tu sede."
+    />
+    <title>Descarga la app · Xentinel</title>
     <link rel="icon" type="image/png" href="/favicon-xentinel.png" />
     <script src="/tema.js"></script>
     <link rel="stylesheet" href="/tema.css" />
     <link rel="stylesheet" href="/descarga.css" />
   </head>
   <body>
-    <header>
-      <a class="marca" href="/"
-        ><img
-          src="/favicon-xentinel.png"
-          alt=""
-          width="36"
-          height="40"
-        />Xentinel</a
-      >
-      <nav aria-label="Navegación">
-        <a href="/contacto">Contáctanos</a
-        ><button id="tema" type="button">Cambiar tema</button>
-      </nav>
+    <a class="salto" href="#contenido">Saltar al contenido</a>
+
+    <!-- Misma cabecera flotante de la web principal (EstructuraPublica.jsx). -->
+    <header class="cabecera">
+      <div class="cabecera-interior">
+        <a class="marca" href="/" aria-label="Xentinel, inicio">
+          <svg viewBox="0 0 1018 1106" aria-hidden="true">
+            <defs>
+              <mask id="x-cabecera">
+                <image href="/simbolo-x.png" width="1018" height="1106" />
+              </mask>
+            </defs>
+            <rect
+              width="1018"
+              height="1106"
+              fill="currentColor"
+              mask="url(#x-cabecera)"
+            />
+          </svg>
+          <span>Xentinel</span>
+        </a>
+        <button
+          id="menu"
+          class="icono-boton menu-conmutador"
+          type="button"
+          aria-label="Abrir menú"
+          aria-expanded="false"
+          aria-controls="navegacion"
+        >
+          <svg class="icono-abrir" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+          <svg class="icono-cerrar" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18 6 6 18M6 6l12 12" />
+          </svg>
+        </button>
+        <nav
+          id="navegacion"
+          class="navegacion"
+          aria-label="Navegación principal"
+        >
+          <a href="/">Inicio</a>
+          <a href="/plataforma">Plataforma</a>
+          <a href="/servicios"
+            >Para empresas
+            <svg class="flecha-diagonal" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M7 7h10v10M7 17 17 7" /></svg
+          ></a>
+          <a href="/contacto">Contáctanos</a>
+          <a class="movil-ingreso" href="/login">Iniciar sesión</a>
+        </nav>
+        <div class="cabecera-acciones">
+          <a class="cabecera-ingreso" href="/login">Iniciar sesión</a>
+          <button
+            id="tema"
+            class="icono-boton"
+            type="button"
+            aria-label="Activar modo claro"
+            title="Activar modo claro"
+          >
+            <svg class="icono-sol" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="4" />
+              <path
+                d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"
+              />
+            </svg>
+            <svg class="icono-luna" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+            </svg>
+          </button>
+          <a
+            class="boton boton--cabecera"
+            href="#descargar"
+            aria-current="page"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"
+              />
+            </svg>
+            <span>Descarga nuestra app</span>
+          </a>
+        </div>
+      </div>
     </header>
-    <main>
-      <p class="antetitulo">Xentinel · CONTIGO EN TU SEDE</p>
-      <h1>Tu comunidad,<br />siempre a mano.</h1>
-      <p>
-        Lleva Xentinel en tu celular. Consulta tu carnet digital y las
-        indicaciones de emergencia de tu centro.
-      </p>
-      <section class="tarjeta" aria-labelledby="titulo-android">
-        <h2 id="titulo-android">Xentinel para Android</h2>
-        <p id="estado-descarga" class="estado" role="status">
-          Estamos comprobando la versión disponible…
-        </p>
-        <a id="enlace-descarga" class="boton" hidden
-          >Descargar para Android ↓</a
-        >
-        <p id="version" class="pequeno" hidden></p>
-        <details id="detalles-archivo" hidden>
-          <summary>Comprobar el archivo descargado</summary>
-          <p class="pequeno">Huella SHA-256 del instalador:</p>
-          <p id="huella" class="huella pequeno"></p>
-        </details>
-        <noscript
-          ><p>
-            Activa JavaScript para comprobar la disponibilidad del instalador.
-          </p></noscript
-        >
+
+    <main id="contenido" tabindex="-1">
+      <section class="portada" aria-labelledby="titulo">
+        <div class="portada-texto">
+          <a class="volver" href="/">
+            <span class="volver-icono" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="m12 19-7-7 7-7M19 12H5" /></svg>
+            </span>
+            Volver al inicio
+          </a>
+          <h1 id="titulo">Tu comunidad, siempre a mano.</h1>
+          <p class="entrada">
+            La app oficial de Xentinel para Android: tu carnet digital, el
+            escáner de acceso de la sede y las alarmas en tiempo real.
+          </p>
+
+          <section
+            id="descargar"
+            class="tarjeta-descarga"
+            aria-labelledby="titulo-android"
+          >
+            <div class="tarjeta-cabecera">
+              <span class="app-icono" aria-hidden="true">
+                <svg viewBox="0 0 1018 1106">
+                  <defs>
+                    <mask id="x-tarjeta">
+                      <image href="/simbolo-x.png" width="1018" height="1106" />
+                    </mask>
+                  </defs>
+                  <rect
+                    width="1018"
+                    height="1106"
+                    fill="currentColor"
+                    mask="url(#x-tarjeta)"
+                  />
+                </svg>
+              </span>
+              <div>
+                <h2 id="titulo-android">Xentinel para Android</h2>
+                <p id="estado-descarga" class="estado" role="status">
+                  Estamos comprobando la versión disponible…
+                </p>
+              </div>
+            </div>
+            <a id="enlace-descarga" class="boton boton--grande" hidden>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"
+                />
+              </svg>
+              Descargar para Android
+            </a>
+            <p id="version" class="meta" hidden></p>
+            <details id="detalles-archivo" hidden>
+              <summary>Comprobar el archivo descargado</summary>
+              <p>
+                Compara esta huella SHA-256 con la del archivo para confirmar
+                que es el instalador oficial:
+              </p>
+              <p id="huella" class="huella"></p>
+            </details>
+            <noscript>
+              <p class="meta">
+                Activa JavaScript para comprobar la disponibilidad del
+                instalador.
+              </p>
+            </noscript>
+            <div class="aviso" role="note">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 16v-4M12 8h.01" />
+              </svg>
+              <p>
+                <strong>¿Tienes la versión 1.2.0?</strong> Desinstálala antes de
+                instalar esta: la 1.3.0 viene con una firma nueva y Android no
+                la instala encima. Tus datos están en tu cuenta; solo vuelves a
+                ingresar.
+              </p>
+            </div>
+          </section>
+        </div>
+
+        <figure class="telefonos">
+          <div class="telefono telefono--atras">
+            <img
+              src="/descarga/app-entrada.webp"
+              width="585"
+              height="1266"
+              alt="Escáner de acceso con el mensaje «Acceso Permitido. ¡Bienvenido!» sobre fondo verde."
+              loading="lazy"
+              decoding="async"
+            />
+          </div>
+          <div class="telefono telefono--frente">
+            <img
+              src="/descarga/app-inicio.webp"
+              width="585"
+              height="1266"
+              alt="Inicio de la app con el carnet digital y el semáforo de alarmas."
+              decoding="async"
+            />
+          </div>
+          <figcaption>Así se ve la app en tu celular.</figcaption>
+        </figure>
       </section>
-      <section class="tarjeta">
-        <h2>Te acompañamos en la instalación</h2>
-        <ol>
+
+      <section class="seccion" aria-labelledby="titulo-pasos">
+        <div class="seccion-cabecera">
+          <h2 id="titulo-pasos">Instálala en tres pasos</h2>
+          <p>Toma menos de un minuto y no necesitas configurar nada.</p>
+        </div>
+        <ol class="pasos">
           <li>
-            Si tienes Xentinel 1.2.0 o una versión anterior, desinstálala
-            primero: la 1.3.0 viene con una firma nueva y Android no la instala
-            encima. Tus datos están en tu cuenta; solo vuelves a ingresar.
+            <span class="paso-numero" aria-hidden="true">1</span>
+            <h3>Descarga el instalador</h3>
+            <p>
+              Toca «Descargar para Android» desde tu celular. El archivo pesa
+              unos 25 MB.
+            </p>
           </li>
           <li>
-            Descarga el instalador desde esta página cuando esté disponible.
+            <span class="paso-numero" aria-hidden="true">2</span>
+            <h3>Permite la instalación</h3>
+            <p>
+              Abre el archivo. Si Android lo pide, deja que tu navegador instale
+              apps y confirma que el nombre es Xentinel.
+            </p>
           </li>
           <li>
-            Abre el archivo. Si Android lo solicita, permite a tu navegador
-            instalar esta aplicación y revisa el nombre Xentinel.
-          </li>
-          <li>
-            Ingresa con tu documento y contraseña. El permiso de cámara se
-            solicita al abrir el escáner de acceso.
+            <span class="paso-numero" aria-hidden="true">3</span>
+            <h3>Ingresa con tu cuenta</h3>
+            <p>
+              Usa tu documento y tu contraseña. La cámara solo se pide cuando
+              abres el escáner de acceso.
+            </p>
           </li>
         </ol>
-        <p class="pequeno">
-          Mantén la app abierta para recibir actualizaciones de alertas. Sigue
-          siempre las indicaciones del personal de emergencia.
-        </p>
       </section>
-      <p class="pequeno">
-        La versión para iPhone aún no tiene un enlace de distribución. Si
-        necesitas ayuda para ingresar, contacta al equipo de tu sede.
-      </p>
-      <a class="volver" href="/">← Volver a Xentinel</a>
+
+      <section class="seccion" aria-labelledby="titulo-funciones">
+        <div class="seccion-cabecera">
+          <h2 id="titulo-funciones">Lo que llevas en el bolsillo</h2>
+          <p>Lo mismo que en la web, pensado para el punto de control.</p>
+        </div>
+        <ul class="funciones">
+          <li>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect width="5" height="5" x="3" y="3" rx="1" />
+              <rect width="5" height="5" x="16" y="3" rx="1" />
+              <rect width="5" height="5" x="3" y="16" rx="1" />
+              <path
+                d="M21 16h-3a2 2 0 0 0-2 2v3M21 21v.01M12 7v3a2 2 0 0 1-2 2H7M3 12h.01M12 3h.01M12 16v.01M16 12h1M21 12v.01M12 21v-1"
+              />
+            </svg>
+            <h3>Carnet digital</h3>
+            <p>
+              Un código QR firmado que cambia solo. Muéstralo al entrar y al
+              salir de la sede.
+            </p>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 12h10"
+              />
+            </svg>
+            <h3>Escáner de acceso</h3>
+            <p>
+              Para celaduría y administración: registra entradas y salidas con
+              la cámara del celular.
+            </p>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3M12 9v4M12 17h.01"
+              />
+            </svg>
+            <h3>Alarmas</h3>
+            <p>
+              Los riesgos críticos llegan en rojo y los avisos en amarillo,
+              apenas suceden.
+            </p>
+          </li>
+        </ul>
+      </section>
+
+      <section class="seccion requisitos" aria-labelledby="titulo-requisitos">
+        <h2 id="titulo-requisitos">Requisitos</h2>
+        <dl>
+          <div>
+            <dt>Sistema</dt>
+            <dd>Android 7.0 o posterior</dd>
+          </div>
+          <div>
+            <dt>Teléfono</dt>
+            <dd>De 64 bits, como casi todos los actuales</dd>
+          </div>
+          <div>
+            <dt>Conexión</dt>
+            <dd>Internet para validar cada acceso</dd>
+          </div>
+          <div>
+            <dt>iPhone</dt>
+            <dd>Aún no disponible: ingresa desde la web</dd>
+          </div>
+        </dl>
+      </section>
     </main>
-    <footer>Xentinel · Tu comunidad, en buenas manos.</footer>
+
+    <footer class="pie">
+      <div class="pie-interior">
+        <a class="marca" href="/" aria-label="Xentinel, inicio">
+          <svg viewBox="0 0 1018 1106" aria-hidden="true">
+            <defs>
+              <mask id="x-pie">
+                <image href="/simbolo-x.png" width="1018" height="1106" />
+              </mask>
+            </defs>
+            <rect
+              width="1018"
+              height="1106"
+              fill="currentColor"
+              mask="url(#x-pie)"
+            />
+          </svg>
+          <span>Xentinel</span>
+        </a>
+        <p>
+          © <span id="anio">2026</span> Xentinel. Gestión y control de acceso.
+        </p>
+        <p>Un proyecto de talento ADSO · SENA</p>
+        <a class="pie-enlace" href="/contacto">¿Necesitas ayuda? Escríbenos</a>
+      </div>
+    </footer>
+
     <script src="/descarga.js"></script>
     <script type="module" src="/descargarAplicacion.mjs"></script>
   </body>

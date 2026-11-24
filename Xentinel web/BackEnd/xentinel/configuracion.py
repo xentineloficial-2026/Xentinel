@@ -7,7 +7,13 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 RAIZ = Path(__file__).resolve().parents[1]
 
@@ -99,6 +105,18 @@ class Configuracion(BaseModel):
             if self.FIREBASE_SERVICE_ACCOUNT
             else None
         )
+
+    @field_validator(
+        "GMAIL_CLIENT_ID",
+        "GMAIL_CLIENT_SECRET",
+        "GMAIL_REFRESH_TOKEN",
+        "SMTP_FROM",
+        mode="before",
+    )
+    @classmethod
+    def limpiar_credencial(cls, valor):
+        """Quita espacios, saltos de línea y comillas que se cuelan al pegar en un panel."""
+        return valor.strip().strip("\"'").strip() if isinstance(valor, str) else valor
 
     @model_validator(mode="after")
     def validar_urls(self):
