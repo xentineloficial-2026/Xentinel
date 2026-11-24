@@ -11,6 +11,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import (
     accesos,
+    alarmas,
     alertas,
     autenticacion,
     catalogos,
@@ -84,6 +85,7 @@ def crear_aplicacion(configuracion=None):
         catalogos.rutas,
         catalogos.reportes,
         alertas.rutas,
+        alarmas.rutas,
         eventos.rutas,
     ):
         app.include_router(rutas, prefix="/api/v1")

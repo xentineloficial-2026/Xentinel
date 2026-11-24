@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Request
 from pydantic import AwareDatetime, StringConstraints, model_validator
 
-from . import credenciales
+from . import alarmas, credenciales
 from .http import Base, Entrada, ErrorAPI, Id, Paginacion, responder
 from .seguridad import CeladorOAdmin, SesionActual, activo, es_admin
 
@@ -17,7 +17,8 @@ AULA_DE_FICHA = """(SELECT h.ambiente FROM horarios h WHERE h.id_ficha=f.id_fich
     AND h.ambiente IS NOT NULL GROUP BY h.ambiente ORDER BY count(*) DESC,h.ambiente LIMIT 1)"""
 # Situaciones formativas con las que el aprendiz deja la ficha y ya no entra a la sede.
 SITUACIONES_RETIRO = ("desertado", "retirado")
-# Un lector sin conexión conserva los escaneos y los envía al reconectar.
+# La app actual valida en línea. Se conserva el margen para las versiones anteriores que
+# aún envían escaneos guardados sin conexión, así no se pierden al actualizar.
 ATRASO_MAXIMO_OFFLINE = timedelta(hours=72)
 ADELANTO_MAXIMO_RELOJ = timedelta(minutes=2)
 
@@ -128,6 +129,24 @@ def listar(db: Base, pagina: Paginacion, sesion: SesionActual, id_usuarios: Id =
     responses={200: {"description": "Movimiento registrado previamente"}},
 )
 def registrar(datos: Movimiento, solicitud: Request, db: Base, sesion: CeladorOAdmin):
+    """Registra el movimiento. Un carnet vencido o que no es verídico deja una alarma."""
+    alarma = {}
+    try:
+        return registrar_movimiento(datos, solicitud, db, sesion, alarma)
+    except ErrorAPI:
+        # La transacción del escaneo ya se revirtió; la alarma se guarda aparte.
+        if alarma:
+            alarmas.registrar_alarma_qr(
+                db,
+                contenido=datos.codigo_qr,
+                registrado_por=sesion.id,
+                tipo=datos.tipo,
+                **alarma,
+            )
+        raise
+
+
+def registrar_movimiento(datos, solicitud, db, sesion, alarma):
     config = solicitud.app.state.configuracion
     ahora = datetime.now(UTC)
     escaneado = None
@@ -152,6 +171,8 @@ def registrar(datos: Movimiento, solicitud: Request, db: Base, sesion: CeladorOA
         )
         identificador, paso_qr = datos.id_usuarios, None
         if datos.codigo_qr is not None:
+            # Hasta comprobar la firma, cualquier rechazo es un código no verídico (rojo).
+            alarma["motivo"] = "QR_INVALIDO"
             if not credenciales.es_codigo_firmado(datos.codigo_qr):
                 raise credenciales.qr_invalido()
             identificador, paso_qr = credenciales.verificar_firma(
@@ -159,6 +180,7 @@ def registrar(datos: Movimiento, solicitud: Request, db: Base, sesion: CeladorOA
             )
             if datos.id_usuarios is not None and datos.id_usuarios != identificador:
                 raise credenciales.qr_invalido()
+            alarma.clear()
         elif datos.metodo == "QR" and config.QR_REQUIRE_SIGNED == "true":
             raise ErrorAPI(
                 422,
@@ -196,7 +218,10 @@ def registrar(datos: Movimiento, solicitud: Request, db: Base, sesion: CeladorOA
             )
         if paso_qr is not None:
             # La vigencia se mide en el instante del escaneo, no en el de la sincronización.
+            # Firma auténtica pero vencida: el titular está identificado (amarillo).
+            alarma.update(motivo="QR_VENCIDO", id_usuarios=identificador)
             credenciales.comprobar_vigencia(paso_qr, (escaneado or ahora).timestamp())
+            alarma.clear()
         retirado = (persona["situacion_formativa"] or "").lower() in SITUACIONES_RETIRO
         estado = "Permitido" if activo(persona) and not retirado else "Denegado"
         if estado == "Permitido":
