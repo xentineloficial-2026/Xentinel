@@ -3,8 +3,8 @@
 //   flutter test test_backend/cloud_flow_test.dart --dart-define=ALLOW_INSECURE_HTTP=true
 //
 // Recorre el flujo de producción con los servicios reales de la app: carnet firmado
-// emitido por el servidor, lectura de celular a celular, registro sin conexión con
-// sincronización idempotente, canal WebSocket, renovación de sesión y revocación.
+// emitido por el servidor, lectura de celular a celular solo en línea (entrada y
+// salida con sus mensajes), canal WebSocket, renovación de sesión y revocación.
 import 'dart:async';
 import 'dart:convert';
 
@@ -16,7 +16,6 @@ import 'package:xentinel/core/session.dart';
 import 'package:xentinel/models/xentinel_models.dart';
 import 'package:xentinel/repositories/access_repository.dart';
 import 'package:xentinel/repositories/auth_repository.dart';
-import 'package:xentinel/services/access_outbox.dart';
 import 'package:xentinel/services/alert_events.dart';
 import 'package:xentinel/services/api_client.dart';
 import 'package:xentinel/services/credential_store.dart';
@@ -34,7 +33,7 @@ void main() {
   SharedPreferences.setMockInitialValues({});
 
   test(
-    'cloud flow: signed carnet, offline queue, WebSocket, renewal and revocation',
+    'cloud flow: signed carnet, online-only scans, WebSocket, renewal and revocation',
     () async {
       final studentSession = SessionStore();
       final guardSession = SessionStore();
@@ -80,52 +79,37 @@ void main() {
       expect(carnet, matches(RegExp(r'^XN2:\d+:\d+:[A-Z2-7]{20}$')));
 
       // 2. Lectura de celular a celular con el servidor en línea.
-      final outbox = AccessOutbox(MemoryOutboxPersistence());
       final network = NetworkStatus(FakeConnectivity());
-      final guard = AccessRepository(
-        guardApi,
-        outbox: outbox,
-        session: guardSession,
-        network: network,
-      );
+      final guard = AccessRepository(guardApi, network: network);
       final entry = await guard.processScanPayload(
         payload: carnet,
         isExitMode: false,
       );
       expect(entry, isA<Granted>());
       expect((entry as Granted).person?.name, 'Andrés Prueba');
+      expect(entry.message, Granted.entryMessage);
 
-      // 3. Sin conexión: la salida queda en la cola y se sincroniza después.
-      final offlineGuard = AccessRepository(
-        offlineApi,
-        outbox: outbox,
-        session: guardSession,
-        network: network,
-      );
+      // 3. Solo en línea: sin servidor no se registra nada; con servidor, la salida
+      // se confirma con su propio mensaje.
+      final offlineGuard = AccessRepository(offlineApi, network: network);
       await Future<void>.delayed(const Duration(seconds: 16));
       final exitCode = store.current!.codeAt(ServerClock.now());
-      final queued = await offlineGuard.processScanPayload(
+      final unreachable = await offlineGuard.processScanPayload(
         payload: exitCode,
         isExitMode: true,
       );
-      expect(queued, isA<QueuedOffline>());
-      expect(outbox.pending, hasLength(1));
-      final scannedAt = outbox.pending.single.scannedAt;
-      expect(await guard.syncPending(), 1);
-      expect(outbox.pending, isEmpty);
-      expect(outbox.issues, isEmpty);
+      expect(unreachable, isA<Unconfirmed>());
+      final exit = await guard.processScanPayload(
+        payload: exitCode,
+        isExitMode: true,
+      );
+      expect(exit, isA<Granted>());
+      expect(exit.message, Granted.exitMessage);
       final history = await adminApi.request(
         'ingresos?id_usuarios=${studentSession.user!.id}',
       );
       final rows = (history as List).cast<Map>();
       expect(rows.map((r) => r['tipo']), ['SALIDA', 'ENTRADA']);
-      // El movimiento conserva la hora del escaneo, no la de la sincronización.
-      expect(
-        DateTime.parse(
-          rows.first['fechahora'] as String,
-        ).difference(scannedAt).inSeconds.abs(),
-        lessThan(2),
-      );
 
       // 4. Canal WebSocket: una alerta creada en el centro de control llega al celular.
       final socket = WebSocketEventConnection();

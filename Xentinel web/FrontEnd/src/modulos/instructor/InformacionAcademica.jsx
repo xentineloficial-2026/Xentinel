@@ -84,7 +84,13 @@ function TarjetaFicha({ ficha }) {
   );
 }
 /** La agenda semanal agrupa el día real y conserva eventos sin día reconocido en una sección aparte. */
-function AgendaSemanal({ registros }) {
+/* El servidor decide el alcance; la vista solo explica qué se está viendo. */
+const ALCANCE_AGENDA = {
+  instructor: 'Solo tus clases: las que dictas tú, en todas tus fichas.',
+  fichas: 'Las clases de tus fichas activas.',
+  todos: 'Todas las clases de la institución.',
+};
+function AgendaSemanal({ registros, alcance }) {
   /* busqueda, cambiarBusqueda: estado de la vista y función para actualizarlo. */
   const [busqueda, cambiarBusqueda] = useEstado('');
   /* visibles: valor de trabajo utilizado en esta operación. */
@@ -101,8 +107,12 @@ function AgendaSemanal({ registros }) {
     <>
       <div className="xn-agenda-herramientas">
         <div>
-          <h2>Calendario semanal</h2>
-          <p className="xn-ayuda">Clases recurrentes · hora de Colombia</p>
+          <h2>
+            {alcance === 'instructor' ? 'Tu horario' : 'Calendario semanal'}
+          </h2>
+          <p className="xn-ayuda">
+            {ALCANCE_AGENDA[alcance] || 'Clases recurrentes.'} Hora de Colombia.
+          </p>
         </div>
         <div className="xn-campo">
           <label htmlFor="buscar-clase">Encuentra tu clase</label>
@@ -144,7 +154,9 @@ function AgendaSemanal({ registros }) {
                         <Ubicacion size={12} />
                         {registro.ambiente || 'Por confirmar'}
                       </span>
-                      <small>Ficha {registro.id_ficha}</small>
+                      <small>
+                        Ficha {registro.numero_ficha || registro.id_ficha}
+                      </small>
                     </article>
                   ))}
                 {!visibles.some(
@@ -299,13 +311,18 @@ export function InformacionAcademica({ tipo, acciones }) {
   /* fichasPersonales: valor de trabajo utilizado en esta operación. */
   const fichasPersonales =
     tipo === 'fichas' && rolParaUsuario(usuario) !== 'admin';
+  /* Agenda personal (instructor o aprendiz): la semana completa, sin páginas. */
+  const agendaPersonal =
+    tipo === 'horarios' && rolParaUsuario(usuario) !== 'admin';
   /* recurso: consulta cancelable al servidor, con datos, estado y reintento. */
   const recurso = useRecurso(
     fichasPersonales
       ? `/usuarios/${usuario.id_usuarios}/fichas`
       : tipo === 'asistencias'
         ? '/asistencias?limit=100' // El calendario no pagina: pide el máximo, con lo más reciente primero.
-        : `/${tipo}?${paginacion.consulta}`
+        : agendaPersonal
+          ? '/horarios?limit=100'
+          : `/${tipo}?${paginacion.consulta}`
   );
   /* canal: estado de la conexión en vivo; cada escaneo actualiza el calendario sin recargar. */
   const canal = useEventos(
@@ -341,7 +358,10 @@ export function InformacionAcademica({ tipo, acciones }) {
       </div>
       <EstadoConsulta recurso={recurso}>
         {tipo === 'horarios' ? (
-          <AgendaSemanal registros={registros} />
+          <AgendaSemanal
+            registros={registros}
+            alcance={recurso.metadatos?.alcance}
+          />
         ) : tipo === 'asistencias' ? (
           <CalendarioAsistencia registros={registros} />
         ) : (
@@ -384,7 +404,7 @@ export function InformacionAcademica({ tipo, acciones }) {
             <p>Cuando se asigne a tu perfil, la encontrarás en este espacio.</p>
           </section>
         )}
-        {!fichasPersonales && (
+        {!fichasPersonales && !agendaPersonal && (
           <Paginacion paginacion={paginacion} cantidad={registros.length} />
         )}
         <p className="xn-ayuda">

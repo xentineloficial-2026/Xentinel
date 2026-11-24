@@ -79,6 +79,7 @@ const horarios = [
     hora_fin: '12:00:00',
     ambiente: 'Ambiente 301',
     id_ficha: 1,
+    id_instructor: 2,
   },
   {
     id_horario: 2,
@@ -88,6 +89,7 @@ const horarios = [
     hora_fin: '12:00:00',
     ambiente: 'Laboratorio 02',
     id_ficha: 1,
+    id_instructor: 9,
   },
   {
     id_horario: 3,
@@ -97,6 +99,7 @@ const horarios = [
     hora_fin: '11:00:00',
     ambiente: 'Ambiente 304',
     id_ficha: 1,
+    id_instructor: 2,
   },
   {
     id_horario: 4,
@@ -106,6 +109,7 @@ const horarios = [
     hora_fin: '12:00:00',
     ambiente: 'Laboratorio 01',
     id_ficha: 1,
+    id_instructor: 9,
   },
   {
     id_horario: 5,
@@ -115,9 +119,70 @@ const horarios = [
     hora_fin: '11:00:00',
     ambiente: 'Ambiente 301',
     id_ficha: 2,
+    id_instructor: 2,
+  },
+].map((horario) => ({
+  ...horario,
+  numero_ficha: fichas.find((ficha) => ficha.id_ficha === horario.id_ficha)
+    .numero_ficha,
+}));
+const alertas = [];
+/* Semáforo igual al de la API: el verde (informativa) nunca es alarma. */
+const semaforoDe = (severidad) =>
+  severidad === 'moderada'
+    ? 'amarillo'
+    : severidad === 'informativa'
+      ? 'verde'
+      : 'rojo';
+const conSemaforo = (alerta) => ({
+  ...alerta,
+  semaforo: semaforoDe(alerta.severidad),
+});
+const alarmasQr = [
+  {
+    id_alarma: 1,
+    motivo: 'QR_INVALIDO',
+    semaforo: 'rojo',
+    titulo: 'Carnet QR no verídico',
+    detalle:
+      'La firma no corresponde a ningún carnet vigente de Xentinel. Puede ser una captura de pantalla, un carnet revocado o un código falsificado. Verifica el documento de identidad.',
+    tipo_movimiento: 'ENTRADA',
+    id_reclamado: 4,
+    titular: null,
+    registrado_por: 'Camilo Demostración',
+    creado_en: new Date(Date.now() - 4 * 60000).toISOString(),
+  },
+  {
+    id_alarma: 2,
+    motivo: 'QR_VENCIDO',
+    semaforo: 'amarillo',
+    titulo: 'Carnet QR vencido',
+    detalle:
+      'El carnet de Laura Demostración estaba vencido al escanearlo. Pide que lo actualice en la app y vuelve a escanear.',
+    tipo_movimiento: 'SALIDA',
+    id_reclamado: 4,
+    titular: 'Laura Demostración',
+    registrado_por: 'Camilo Demostración',
+    creado_en: new Date(Date.now() - 18 * 60000).toISOString(),
   },
 ];
-const alertas = [];
+const asistencia = [
+  ['Andrés Torres', '1001', 'Presente', '06:52:00'],
+  ['Beatriz Gómez', '1002', 'Retardo', '07:14:00'],
+  ['Camila Ruiz', '1003', 'Ausente', null],
+  ['Diego Pardo', '1004', 'Sin registro', null],
+].map(([nombre, documento, estado, entrada], indice) => ({
+  id_usuarios: 20 + indice,
+  nombres_completos: nombre,
+  tipo_documento: 'TI',
+  numero_documento: documento,
+  id_ficha: 1,
+  numero_ficha: 'DEMO-2026',
+  ambiente: 'Ambiente 301',
+  hora_entrada: entrada,
+  hora_salida: null,
+  estado_asistencia: estado,
+}));
 const complemento = {
   name: 'api-qa-aislada',
   configureServer(servidor) {
@@ -139,9 +204,9 @@ const complemento = {
         (persona) =>
           peticion.headers.authorization === `Bearer qa-${persona.id_usuarios}`
       );
-      const enviar = (datos, estado = 200) => {
+      const enviar = (datos, estado = 200, meta) => {
         respuesta.statusCode = estado;
-        respuesta.end(JSON.stringify({ data: datos }));
+        respuesta.end(JSON.stringify({ data: datos, ...(meta && { meta }) }));
       };
       const fallar = (mensaje, estado = 400, codigo = 'ERROR_QA') => {
         respuesta.statusCode = estado;
@@ -179,6 +244,31 @@ const complemento = {
         );
       if (!usuario) return fallar('Inicia sesión', 401);
       if (ruta === '/auth/me') return enviar(usuario);
+      if (ruta === '/auth/contrasena')
+        return cuerpo.actual === 'demo-password-12'
+          ? enviar(null, 200)
+          : fallar(
+              'Contraseña actual incorrecta o sesión revocada',
+              401,
+              'INVALID_CREDENTIALS'
+            );
+      if (ruta === '/auth/correo/solicitar')
+        return cuerpo.contrasena === 'demo-password-12'
+          ? enviar(
+              {
+                message: `Enviamos un código de 6 dígitos a ${cuerpo.correo}. Vence en 15 minutos.`,
+              },
+              202
+            )
+          : fallar('La contraseña actual no es correcta', 401);
+      if (ruta === '/auth/correo/confirmar')
+        return cuerpo.codigo === '123456'
+          ? enviar(usuario)
+          : fallar(
+              'El código es incorrecto, venció o ya fue utilizado. Solicita uno nuevo.',
+              400,
+              'INVALID_RESET_CODE'
+            );
       if (ruta === '/auth/logout') {
         respuesta.statusCode = 204;
         return respuesta.end();
@@ -224,7 +314,94 @@ const complemento = {
           }))
         );
       if (ruta === '/fichas') return enviar(fichas);
-      if (ruta === '/horarios') return enviar(horarios);
+      if (ruta === '/horarios') {
+        const alcance =
+          usuario.id_rol === 3
+            ? 'todos'
+            : usuario.id_rol === 2
+              ? 'instructor'
+              : 'fichas';
+        return enviar(
+          alcance === 'instructor'
+            ? horarios.filter((horario) => horario.id_instructor === 2)
+            : horarios,
+          200,
+          { alcance }
+        );
+      }
+      if (ruta === '/asistencias/fichas')
+        return enviar(
+          fichas.map((ficha) => ({
+            ...ficha,
+            hora_inicio: '07:00:00',
+            hora_fin: '12:00:00',
+          }))
+        );
+      if (ruta === '/asistencias/lista') return enviar(asistencia);
+      if (ruta === '/asistencias/estado') {
+        const fila = asistencia.find(
+          (elemento) => elemento.id_usuarios === cuerpo.id_usuarios
+        );
+        if (fila) fila.estado_asistencia = cuerpo.estado;
+        return enviar(cuerpo);
+      }
+      if (ruta === '/alarmas') {
+        const personal = [1, 3].includes(usuario.id_usuarios);
+        const riesgos = alertas
+          .filter((alerta) => alerta.activa)
+          .map(conSemaforo)
+          .filter((alerta) => alerta.semaforo !== 'verde')
+          .map((alerta) => ({
+            id: `riesgo-${alerta.id_alerta}`,
+            origen: 'riesgo',
+            semaforo: alerta.semaforo,
+            titulo: alerta.tipo_alerta,
+            detalle: alerta.mensaje,
+            fecha: alerta.fecha_inicio,
+            id_alerta: alerta.id_alerta,
+            severidad: alerta.severidad,
+            fuente: alerta.fuente,
+          }));
+        const escaneos = personal
+          ? alarmasQr
+              .filter((alarma) => !alarma.atendida_en)
+              .map((alarma) => ({
+                ...alarma,
+                id: `qr-${alarma.id_alarma}`,
+                origen: 'qr',
+                fecha: alarma.creado_en,
+              }))
+          : [];
+        const todas = [...riesgos, ...escaneos];
+        const filtro = new URL(peticion.url, 'http://qa').searchParams.get(
+          'semaforo'
+        );
+        const conteo = {
+          rojo: todas.filter((alarma) => alarma.semaforo === 'rojo').length,
+          amarillo: todas.filter((alarma) => alarma.semaforo === 'amarillo')
+            .length,
+        };
+        return enviar(
+          todas
+            .filter((alarma) => !filtro || alarma.semaforo === filtro)
+            .sort(
+              (a, b) =>
+                (a.semaforo === 'rojo' ? 0 : 1) -
+                  (b.semaforo === 'rojo' ? 0 : 1) ||
+                b.fecha.localeCompare(a.fecha)
+            ),
+          200,
+          { conteo, incluye_qr: personal }
+        );
+      }
+      if (/^\/alarmas\/qr\/\d+\/atender$/.test(ruta)) {
+        const alarma = alarmasQr.find(
+          (elemento) => elemento.id_alarma === Number(ruta.split('/')[3])
+        );
+        if (!alarma) return fallar('Alarma no encontrada', 404);
+        alarma.atendida_en = new Date().toISOString();
+        return enviar(alarma);
+      }
       if (ruta === '/asistencias')
         return enviar([
           {
@@ -255,17 +432,28 @@ const complemento = {
           },
         ]);
       if (ruta === '/alertas/activas')
-        return enviar(alertas.filter((alerta) => alerta.activa));
+        return enviar(
+          alertas
+            .filter((alerta) => alerta.activa)
+            .map(conSemaforo)
+            .filter((alerta) => alerta.semaforo !== 'verde')
+        );
       if (ruta === '/alertas' && peticion.method === 'GET')
-        return enviar(alertas);
+        return enviar(
+          alertas
+            .map(conSemaforo)
+            .filter((alerta) => alerta.semaforo !== 'verde')
+        );
       if (ruta === '/alertas' && peticion.method === 'POST') {
         const alerta = {
+          fuente: 'Operador SENA',
           ...cuerpo,
           id_alerta: alertas.length + 1,
           activa: true,
+          fecha_inicio: new Date().toISOString(),
         };
         alertas.push(alerta);
-        return enviar(alerta, 201);
+        return enviar(conSemaforo(alerta), 201);
       }
       if (/^\/alertas\/\d+\/cerrar$/.test(ruta)) {
         const alerta = alertas.find(

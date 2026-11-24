@@ -18,7 +18,6 @@ import 'package:xentinel/services/camera_session.dart';
 import 'package:xentinel/screens/carnet_screen.dart';
 import 'package:xentinel/screens/alerts_screen.dart';
 import 'package:xentinel/screens/scanner_screen.dart';
-import 'package:xentinel/services/access_outbox.dart';
 import 'package:xentinel/services/biometric_service.dart';
 import 'package:xentinel/services/credential_store.dart';
 import 'package:xentinel/services/network_status.dart';
@@ -107,10 +106,13 @@ void main() {
   late FakeConnectivity connectivity;
   bool disposed = false;
   final requests = <http.Request>[];
+  // Alarmas de escaneo que devuelve el servidor simulado.
+  var scanAlarms = <Object>[];
 
   setUp(() {
     disposed = false;
     requests.clear();
+    scanAlarms = [];
     session = SessionStore();
     permissions = TestPermissions();
     brightness = FakeBrightness();
@@ -127,9 +129,21 @@ void main() {
         if (request.url.path.endsWith('/auth/logout')) {
           return http.Response('', 204);
         }
+        if (request.url.path.endsWith('/alarmas')) {
+          // UTF-8 como el servidor: los textos llevan tildes.
+          return http.Response(
+            jsonEncode({'data': scanAlarms}),
+            200,
+            headers: {'content-type': 'application/json; charset=utf-8'},
+          );
+        }
         return http.Response(
           jsonEncode({
-            'data': request.url.path.endsWith('/alertas/activas') ? [] : {},
+            'data':
+                request.url.path.endsWith('/alertas/activas') ||
+                    request.url.path.endsWith('/alarmas')
+                ? []
+                : {},
           }),
           200,
         );
@@ -142,7 +156,6 @@ void main() {
         cameraPermissionsProvider.overrideWithValue(permissions),
         connectivitySourceProvider.overrideWithValue(connectivity),
         secureStoreProvider.overrideWithValue(MemorySecureStore()),
-        outboxPersistenceProvider.overrideWithValue(MemoryOutboxPersistence()),
         brightnessControlProvider.overrideWithValue(brightness),
         biometricServiceProvider.overrideWithValue(biometrics),
         alertsProvider.overrideWith((ref) {
@@ -269,6 +282,16 @@ void main() {
       signIn();
       await mount(tester);
       final router = container.read(routerProvider);
+      // Sin barra inferior: los accesos viven una sola vez en el inicio, y el
+      // escáner es la acción principal del personal de control.
+      expect(find.byType(NavigationBar), findsNothing);
+      expect(find.text('Inicio'), findsNothing);
+      expect(find.text('Escáner de acceso'), findsOneWidget);
+      expect(find.text('Mi carnet digital'), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.text('Escáner de acceso')).dy,
+        lessThan(tester.getTopLeft(find.text('Mi carnet digital')).dy),
+      );
       for (final destination in {
         '/carnet': CarnetScreen,
         '/alerts': AlertsScreen,
@@ -289,8 +312,15 @@ void main() {
       await tester.tap(find.text('Volver al inicio'));
       await tester.pumpAndSettle();
       expect(router.routeInformationProvider.value.uri.path, '/home');
-      await tester.ensureVisible(find.text('Cerrar sesión'));
-      await tester.tap(find.text('Cerrar sesión'));
+      // Cerrar sesión pide confirmación: un toque accidental no saca a nadie.
+      await tester.tap(find.byTooltip('Cerrar sesión'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancelar'));
+      await tester.pumpAndSettle();
+      expect(router.routeInformationProvider.value.uri.path, '/home');
+      await tester.tap(find.byTooltip('Cerrar sesión'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Cerrar sesión'));
       await tester.pumpAndSettle();
       expect(router.routeInformationProvider.value.uri.path, '/login');
       expect(requests.any((r) => r.url.path.endsWith('/auth/logout')), isTrue);
@@ -356,58 +386,87 @@ void main() {
   );
 
   testWidgets(
-    'saved carnet opens from login without session or network after biometrics',
+    'QR works only online: no offline carnet, and the carnet waits for a connection',
     (tester) async {
       await mount(tester);
-      expect(find.text('Mostrar mi carnet sin conexión'), findsNothing);
+      expect(find.textContaining('sin conexión'), findsNothing);
+      final router = container.read(routerProvider);
+      signIn(UserRole.aprendiz);
+      await tester.pumpAndSettle();
+      router.go('/carnet-offline');
+      await tester.pumpAndSettle();
+      expect(find.text('Esta pantalla ya no está disponible.'), findsOneWidget);
+      router.go('/home');
+      await tester.pumpAndSettle();
       await container.read(credentialStoreProvider).save(credentialFor7());
       connectivity.set(false);
+      router.push('/carnet');
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Mostrar mi carnet sin conexión'));
-      await tester.tap(find.text('Mostrar mi carnet sin conexión'));
+      expect(find.text('Sin conexión'), findsOneWidget);
+      expect(find.byType(QrImageView), findsNothing);
+      connectivity.set(true);
       await tester.pumpAndSettle();
-      expect(biometrics.calls, 1);
-      expect(find.byType(CarnetScreen), findsOneWidget);
-      expect(find.text('María Rodríguez'), findsOneWidget);
-      expect(find.text('Doc. 1007'), findsOneWidget);
-      expect(find.textContaining('Sin conexión'), findsOneWidget);
       expect(find.byType(QrImageView), findsOneWidget);
-      expect(requests, isEmpty, reason: 'el carnet no necesita servidor');
+      expect(find.text('Sin conexión'), findsNothing);
       await unmount(tester);
     },
   );
 
   testWidgets(
-    'scanner shows the offline state and the pending queue to the guard',
+    'guards see QR alarms on the semáforo and can mark them as reviewed',
     (tester) async {
+      scanAlarms = [
+        {
+          'id': 'qr-5',
+          'origen': 'qr',
+          'semaforo': 'rojo',
+          'titulo': 'Carnet QR no verídico',
+          'detalle': 'La firma no corresponde a ningún carnet vigente.',
+          'fecha': DateTime.now().toUtc().toIso8601String(),
+          'id_alarma': 5,
+          'tipo_movimiento': 'ENTRADA',
+          'id_reclamado': 7,
+          'titular': null,
+          'registrado_por': 'Andrés García',
+        },
+      ];
       signIn();
-      permissions.status = PermissionStatus.granted;
       await mount(tester);
-      await container
-          .read(accessOutboxProvider)
-          .add(
-            PendingAccess(
-              requestId: '3a1e7c4a-1111-4111-8111-111111111111',
-              operatorId: '7',
-              userId: 51,
-              type: 'ENTRADA',
-              scannedAt: DateTime.now(),
-            ),
-          );
-      connectivity.set(false);
-      container.read(routerProvider).push('/scanner');
+      expect(find.text('1 alarma activa'), findsOneWidget);
+      expect(find.text('1 en rojo'), findsOneWidget);
+      await tester.tap(find.text('1 alarma activa'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertsScreen), findsOneWidget);
+      expect(find.text('Carnet QR no verídico'), findsOneWidget);
+      expect(find.text('ID 7'), findsOneWidget);
+      scanAlarms = [];
+      await tester.ensureVisible(find.text('Marcar como revisada'));
+      await tester.tap(find.text('Marcar como revisada'));
       await tester.pumpAndSettle();
       expect(
-        find.textContaining('Sin conexión: los accesos se guardan'),
-        findsOneWidget,
+        requests.any(
+          (r) =>
+              r.method == 'PATCH' &&
+              r.url.path.endsWith('/alarmas/qr/5/atender'),
+        ),
+        isTrue,
       );
-      await tester.tap(find.byTooltip('Registros sin conexión'));
-      await tester.pumpAndSettle();
-      expect(find.text('ID 51 · ENTRADA'), findsOneWidget);
-      expect(find.textContaining('al recuperar la conexión'), findsOneWidget);
+      expect(find.text('Carnet QR no verídico'), findsNothing);
       await unmount(tester);
     },
   );
+
+  testWidgets('scanner without network says it needs internet', (tester) async {
+    signIn();
+    permissions.status = PermissionStatus.granted;
+    await mount(tester);
+    connectivity.set(false);
+    container.read(routerProvider).push('/scanner');
+    await tester.pumpAndSettle();
+    expect(find.textContaining('el escáner necesita internet'), findsOneWidget);
+    expect(find.byTooltip('Registros sin conexión'), findsNothing);
+    await unmount(tester);
+  });
 
   testWidgets(
     'small phone and enlarged text keep every screen free of overflow',
@@ -429,13 +488,7 @@ void main() {
       await tester.pumpAndSettle();
       await container.read(credentialStoreProvider).save(credentialFor7());
       permissions.status = PermissionStatus.granted;
-      for (final route in [
-        '/home',
-        '/carnet',
-        '/carnet-offline',
-        '/alerts',
-        '/scanner',
-      ]) {
+      for (final route in ['/home', '/carnet', '/alerts', '/scanner']) {
         router.go(route);
         // A first-query progress indicator may animate while route callbacks run.
         for (var frame = 0; frame < 10; frame++) {

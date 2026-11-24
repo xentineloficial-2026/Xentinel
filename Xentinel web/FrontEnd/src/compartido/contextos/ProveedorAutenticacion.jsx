@@ -12,6 +12,8 @@ function ProveedorAutenticacion({ children: contenido }) {
   const [sesion, cambiarSesion] = useEstado(leerSesion);
   /* mensajeSesion, cambiarMensajeSesion: estado de la vista y función para actualizarlo. */
   const [mensajeSesion, cambiarMensajeSesion] = useEstado('');
+  /* tonoSesion: «exito» cuando el cierre fue una confirmación (contraseña o correo nuevos). */
+  const [tonoSesion, cambiarTonoSesion] = useEstado('error');
   /* iniciarSesion: valor de trabajo utilizado en esta operación. */
   const iniciarSesion = useRetorno((datos) => {
     if (
@@ -43,10 +45,13 @@ function ProveedorAutenticacion({ children: contenido }) {
   }, []);
   useEfecto(() => {
     /* caducar: operación local que atiende el evento o transforma la información. */
-    const caducar = () => {
+    const caducar = (evento) => {
       guardarSesion(null);
       cambiarSesion(null);
-      cambiarMensajeSesion('Tu sesión venció. Inicia sesión nuevamente.');
+      cambiarMensajeSesion(
+        evento?.detail?.mensaje || 'Tu sesión venció. Inicia sesión nuevamente.'
+      );
+      cambiarTonoSesion(evento?.detail?.tono || 'error');
     };
     window.addEventListener('xentinel:session-expired', caducar);
     /* temporizador: valor de trabajo utilizado en esta operación. */
@@ -76,6 +81,7 @@ function ProveedorAutenticacion({ children: contenido }) {
         iniciarSesion,
         cerrarSesion,
         mensajeSesion,
+        tonoSesion,
       }}
     >
       {contenido}

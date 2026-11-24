@@ -107,7 +107,7 @@ test('migraciones repetibles y esquema esperado', async () => {
   // El migrador anterior verifica que FastAPI conserva los checksums existentes.
   await migrate(pool);
   await migrarFastApi(config.DATABASE_URL);
-  assert.equal((await pool.query('SELECT count(*)::int n FROM schema_migrations')).rows[0].n, 6);
+  assert.equal((await pool.query('SELECT count(*)::int n FROM schema_migrations')).rows[0].n, 7);
   const result = await pool.query(
     "SELECT column_name FROM information_schema.columns WHERE table_name='password_reset_tokens'",
   );
@@ -1129,5 +1129,473 @@ test('monitor sísmico: EMSC y USGS crean una sola alerta, la publican por FCM y
   } finally {
     await monitor.cerrar();
     await simulados.cerrar();
+  }
+});
+test('asistencia: Retardo y Ausente en la lista, el periodo y la edición manual', async () => {
+  const {
+    rows: [{ id_programa: programa }],
+  } = await pool.query("INSERT INTO programa(nombre_programa) VALUES('Asistencia') RETURNING id_programa");
+  const {
+    rows: [{ id_ficha: ficha }],
+  } = await pool.query("INSERT INTO ficha(numero_ficha,id_programa) VALUES('F-ASIS',$1) RETURNING id_ficha", [
+    programa,
+  ]);
+  await pool.query("INSERT INTO jornada(id_ficha,nombre,hora_inicio,hora_fin) VALUES($1,'Mañana','07:00','12:00')", [
+    ficha,
+  ]);
+  const aprendices = [];
+  for (const [documento, nombre] of [
+    ['50001', 'Ana Retardo'],
+    ['50002', 'Beto Ausente'],
+  ]) {
+    const {
+      rows: [{ id_usuarios: id }],
+    } = await pool.query(
+      `INSERT INTO usuarios(nombres_completos,tipo_documento,numero_documento,correo,contrasena,id_rol)
+      SELECT $1,'CC',$2,NULL,'x',id_rol FROM rol WHERE nombre_rol='Aprendiz' RETURNING id_usuarios`,
+      [nombre, documento],
+    );
+    await pool.query("INSERT INTO aprendiz_ficha(id_usuarios,id_ficha,estado) VALUES($1,$2,'Activo')", [id, ficha]);
+    aprendices.push(id);
+  }
+  const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
+  // Una fila histórica con el nombre anterior se lee como «Retardo».
+  await pool.query(
+    `INSERT INTO asistencia(id_usuarios,id_jornada,fecha,hora_entrada,estado)
+    SELECT $1,id_jornada,$2,'07:20','Retrasado' FROM jornada WHERE id_ficha=$3`,
+    [aprendices[0], hoy, ficha],
+  );
+  const cambiar = (estado, id = aprendices[1]) =>
+    api('/asistencias/estado', {
+      method: 'PUT',
+      token: adminToken,
+      body: { id_usuarios: id, id_ficha: ficha, fecha: hoy, estado },
+    });
+  assert.equal((await cambiar('Ausente')).status, 200);
+  assert.equal((await cambiar('Tarde')).status, 422);
+  const lista = await api(`/asistencias/lista?id_ficha=${ficha}&fecha=${hoy}`, { token: adminToken });
+  assert.deepEqual(
+    lista.body.data.map((fila) => [fila.nombres_completos, fila.estado_asistencia]),
+    [
+      ['Ana Retardo', 'Retardo'],
+      ['Beto Ausente', 'Ausente'],
+    ],
+  );
+  // Una pestaña abierta antes de actualizar todavía envía «Retrasado»: se guarda como «Retardo».
+  assert.equal((await cambiar('Retrasado', aprendices[0])).body.data.estado, 'Retardo');
+  const guardado = await pool.query('SELECT estado FROM asistencia WHERE id_usuarios=$1', [aprendices[0]]);
+  assert.equal(guardado.rows[0].estado, 'Retardo');
+  const periodo = await api(`/asistencias/periodo?id_ficha=${ficha}&desde=${hoy}&hasta=${hoy}`, {
+    token: adminToken,
+  });
+  assert.equal(periodo.status, 200, JSON.stringify(periodo.body));
+  const porNombre = Object.fromEntries(periodo.body.data.resumen.map((fila) => [fila.nombres_completos, fila]));
+  assert.deepEqual(
+    ['presentes', 'retardos', 'ausentes', 'sin_registro'].map((clave) => porNombre['Ana Retardo'][clave]),
+    [0, 1, 0, 0],
+  );
+  assert.equal(porNombre['Beto Ausente'].ausentes, 1);
+  assert.equal(porNombre['Beto Ausente'].asistencia, 0);
+  assert.equal(porNombre['Ana Retardo'].asistencia, 100);
+  assert.equal(porNombre['Ana Retardo'].puntualidad, 0);
+});
+test('calendario personal: el instructor ve solo sus clases y el aprendiz las de su ficha', async () => {
+  const instructores = [];
+  for (const [documento, nombre] of [
+    ['30001', 'Uldarico Prueba'],
+    ['30002', 'Otra Instructora'],
+  ]) {
+    await pool.query(
+      `INSERT INTO usuarios(nombres_completos,tipo_documento,numero_documento,correo,contrasena,id_rol)
+      SELECT $1,'CC',$2,NULL,$3,id_rol FROM rol WHERE nombre_rol='Instructor'`,
+      [nombre, documento, await bcrypt.hash(password, 4)],
+    );
+    const ingreso = await api('/auth/login', { method: 'POST', body: { documento, contrasena: password } });
+    assert.equal(ingreso.status, 200, JSON.stringify(ingreso.body));
+    instructores.push(ingreso.body.data);
+  }
+  const [uldarico, otra] = instructores;
+  const {
+    rows: [{ id_programa: programa }],
+  } = await pool.query("INSERT INTO programa(nombre_programa) VALUES('Calendario') RETURNING id_programa");
+  const fichas = [];
+  for (const numero of ['CAL-1', 'CAL-2']) {
+    const {
+      rows: [{ id_ficha: id }],
+    } = await pool.query('INSERT INTO ficha(numero_ficha,id_programa) VALUES($1,$2) RETURNING id_ficha', [
+      numero,
+      programa,
+    ]);
+    fichas.push(id);
+  }
+  // Uldarico dicta en CAL-1; la otra instructora dicta en CAL-1 y en CAL-2.
+  for (const [ficha, instructor, clase] of [
+    [fichas[0], uldarico.usuario.id_usuarios, 'Bases de datos'],
+    [fichas[0], otra.usuario.id_usuarios, 'Inglés'],
+    [fichas[1], otra.usuario.id_usuarios, 'Redes'],
+  ])
+    await pool.query(
+      `INSERT INTO horarios(id_ficha,id_instructor,nombre_clase,dia_semana,hora_inicio,hora_fin,ambiente)
+      VALUES($1,$2,$3,'Lunes','07:00','09:00','Aula 1')`,
+      [ficha, instructor, clase],
+    );
+  const propios = await api('/horarios?limit=100', { token: uldarico.access_token });
+  assert.equal(propios.status, 200);
+  assert.equal(propios.body.meta.alcance, 'instructor');
+  assert.deepEqual(
+    propios.body.data.map((fila) => [fila.nombre_clase, fila.numero_ficha]),
+    [['Bases de datos', 'CAL-1']],
+  );
+  assert.ok(propios.body.data.every((fila) => fila.id_instructor === uldarico.usuario.id_usuarios));
+  const fichasPropias = await api('/fichas?limit=100', { token: uldarico.access_token });
+  assert.deepEqual(
+    fichasPropias.body.data.map((fila) => fila.numero_ficha),
+    ['CAL-1'],
+  );
+  const todos = await api('/horarios?limit=100', { token: adminToken });
+  assert.equal(todos.body.meta.alcance, 'todos');
+  assert.ok(todos.body.data.length >= 3);
+  // El aprendiz ve las clases de su ficha, de cualquier instructor.
+  await pool.query("INSERT INTO aprendiz_ficha(id_usuarios,id_ficha,estado) VALUES($1,$2,'Activo')", [
+    otherId,
+    fichas[1],
+  ]);
+  const ingreso = await api('/auth/login', { method: 'POST', body: { documento: '10004', contrasena: password } });
+  const delAprendiz = await api('/horarios?limit=100', { token: ingreso.body.data.access_token });
+  assert.equal(delAprendiz.body.meta.alcance, 'fichas');
+  assert.deepEqual(
+    delAprendiz.body.data.map((fila) => fila.nombre_clase),
+    ['Redes'],
+  );
+});
+test('alarmas: QR vencido en amarillo, QR no verídico en rojo, riesgos sin verde y atención', async () => {
+  await pool.query('DELETE FROM api_rate_limits');
+  await pool.query('DELETE FROM alarmas_qr');
+  const ingreso = await api('/auth/login', { method: 'POST', body: { documento: '10004', contrasena: password } });
+  const tokenTitular = ingreso.body.data.access_token;
+  const credencial = await api('/auth/credencial-qr', { token: tokenTitular });
+  const claveBytes = Buffer.from(credencial.body.data.clave, 'base64url');
+  const registrar = (body) =>
+    api('/ingresos', {
+      method: 'POST',
+      token: guardToken,
+      body: { tipo: 'ENTRADA', metodo: 'QR', request_id: randomUUID(), ...body },
+    });
+  const vencido = codigoXn2(claveBytes, otherId, pasoActual() - 10);
+  assert.equal((await registrar({ codigo_qr: vencido })).body.error.code, 'QR_EXPIRED');
+  // La cámara vuelve a leer el mismo código: sigue siendo una sola alarma.
+  assert.equal((await registrar({ codigo_qr: vencido })).body.error.code, 'QR_EXPIRED');
+  const falso = codigoXn2(randomBytes(32), otherId, pasoActual());
+  assert.equal((await registrar({ codigo_qr: falso, tipo: 'SALIDA' })).body.error.code, 'INVALID_QR');
+  // El lector informa un QR que ni siquiera es de Xentinel.
+  const reporte = (body, token = guardToken) => api('/alarmas/qr', { method: 'POST', token, body });
+  const ajeno = await reporte({ motivo: 'QR_INVALIDO', contenido: 'https://example.org/promo', tipo: 'ENTRADA' });
+  assert.equal(ajeno.status, 201, JSON.stringify(ajeno.body));
+  assert.match(ajeno.body.data.detalle, /no es un carnet de Xentinel/);
+  assert.equal((await reporte({ motivo: 'QR_INVALIDO', contenido: 'https://example.org/promo' })).status, 200);
+  assert.equal((await reporte({ motivo: 'QR_INVALIDO', contenido: 'x' }, studentToken)).status, 403);
+  assert.equal((await reporte({ motivo: 'OTRO', contenido: 'x' })).status, 422);
+  const filas = (
+    await pool.query(
+      'SELECT motivo,semaforo,id_usuarios,id_reclamado,tipo_movimiento,huella,detalle FROM alarmas_qr ORDER BY id_alarma',
+    )
+  ).rows;
+  assert.deepEqual(
+    filas.map((fila) => [fila.motivo, fila.semaforo]),
+    [
+      ['QR_VENCIDO', 'amarillo'],
+      ['QR_INVALIDO', 'rojo'],
+      ['QR_INVALIDO', 'rojo'],
+    ],
+  );
+  assert.equal(filas[0].id_usuarios, otherId);
+  assert.match(filas[0].detalle, /Laura Ríos/);
+  assert.equal(filas[1].id_usuarios, null);
+  assert.equal(Number(filas[1].id_reclamado), otherId);
+  assert.equal(filas[1].tipo_movimiento, 'SALIDA');
+  // Solo la huella: el contenido leído no se guarda.
+  assert.ok(filas.every((fila) => !Object.values(fila).some((valor) => String(valor).includes(falso))));
+  // Riesgos: una alerta verde (informativa) no es alarma; una moderada es amarilla.
+  const {
+    rows: [verde],
+  } = await pool.query(
+    `INSERT INTO alertas_emergencia(tipo_alerta,mensaje,severidad,emisor_id)
+    VALUES('Otra','Evento normal de prueba','informativa',$1) RETURNING id_alerta`,
+    [adminId],
+  );
+  const amarilla = await api('/alertas', {
+    method: 'POST',
+    token: adminToken,
+    body: { tipo_alerta: 'Meteorológica', mensaje: 'Lluvias fuertes esta tarde', severidad: 'moderada' },
+  });
+  assert.equal(amarilla.body.data.semaforo, 'amarillo');
+  const activas = (await api('/alertas/activas', { token: studentToken })).body.data;
+  assert.ok(!activas.some((alerta) => alerta.id_alerta === verde.id_alerta));
+  assert.ok(activas.every((alerta) => ['rojo', 'amarillo'].includes(alerta.semaforo)));
+  assert.ok(!(await api('/alertas?limit=100', { token: adminToken })).body.data.some((a) => a.id_alerta === verde.id_alerta));
+  // El celador ve riesgos y escaneos, primero los rojos; el aprendiz solo ve riesgos.
+  const deCelador = await api('/alarmas', { token: guardToken });
+  assert.equal(deCelador.status, 200, JSON.stringify(deCelador.body));
+  assert.equal(deCelador.body.meta.incluye_qr, true);
+  const colores = deCelador.body.data.map((alarma) => alarma.semaforo);
+  assert.deepEqual(colores, [...colores].sort((a, b) => (a === 'rojo' ? 0 : 1) - (b === 'rojo' ? 0 : 1)));
+  assert.equal(deCelador.body.data.filter((alarma) => alarma.origen === 'qr').length, 3);
+  assert.ok(deCelador.body.data.some((alarma) => alarma.id === `riesgo-${amarilla.body.data.id_alerta}`));
+  assert.ok(!deCelador.body.data.some((alarma) => alarma.id === `riesgo-${verde.id_alerta}`));
+  assert.equal(
+    deCelador.body.meta.conteo.amarillo,
+    deCelador.body.data.filter((alarma) => alarma.semaforo === 'amarillo').length,
+  );
+  const rojas = await api('/alarmas?semaforo=rojo', { token: guardToken });
+  assert.ok(rojas.body.data.length && rojas.body.data.every((alarma) => alarma.semaforo === 'rojo'));
+  assert.equal((await api('/alarmas?semaforo=verde', { token: guardToken })).status, 422);
+  const deAprendiz = await api('/alarmas', { token: studentToken });
+  assert.equal(deAprendiz.body.meta.incluye_qr, false);
+  assert.ok(deAprendiz.body.data.every((alarma) => alarma.origen === 'riesgo'));
+  // Atender la saca de pendientes y conserva quién la revisó.
+  const qr = deCelador.body.data.find((alarma) => alarma.origen === 'qr');
+  const atender = (id, token = guardToken) => api(`/alarmas/qr/${id}/atender`, { method: 'PATCH', token });
+  assert.equal((await atender(qr.id_alarma, studentToken)).status, 403);
+  const atendida = await atender(qr.id_alarma);
+  assert.equal(atendida.status, 200);
+  assert.ok(atendida.body.data.atendida_en);
+  assert.ok(!(await api('/alarmas', { token: guardToken })).body.data.some((alarma) => alarma.id === qr.id));
+  assert.equal((await atender(999999)).status, 404);
+  await api(`/alertas/${amarilla.body.data.id_alerta}/cerrar`, { method: 'PATCH', token: adminToken });
+});
+test('gestión de riesgos: evaluación sin efectos, simulacro hasta la alerta y permisos', async () => {
+  await pool.query('DELETE FROM api_rate_limits');
+  const evaluar = (body, token = adminToken) => api('/riesgos/evaluar', { method: 'POST', token, body });
+  assert.equal((await evaluar({ magnitud: 6, latitud: 4.5, longitud: -74.2 }, guardToken)).status, 403);
+  assert.equal((await evaluar({ magnitud: 11, latitud: 4.5, longitud: -74.2 })).status, 422);
+  const parametros = await api('/riesgos/configuracion', { token: adminToken });
+  assert.equal(parametros.status, 200);
+  assert.deepEqual(
+    parametros.body.data.semaforo.map((regla) => regla.semaforo),
+    ['rojo', 'rojo', 'amarillo', 'verde'],
+  );
+  const antes = (await pool.query('SELECT count(*)::int n FROM sismos_detectados')).rows[0].n;
+  const casos = [
+    [{ magnitud: 6.2, latitud: 4.5, longitud: -74.2 }, ['critica', 'rojo', true]],
+    [{ magnitud: 5.4, latitud: 4.5, longitud: -74.2 }, ['alta', 'rojo', true]],
+    [{ magnitud: 4.3, latitud: 4.9, longitud: -74.3 }, ['moderada', 'amarillo', true]],
+    [{ magnitud: 4.2, latitud: 6.5, longitud: -75.5 }, ['informativa', 'verde', false]],
+    [{ magnitud: 7, latitud: -33.4, longitud: -70.6 }, ['informativa', 'verde', false]],
+  ];
+  for (const [cuerpo, esperado] of casos) {
+    const { data } = (await evaluar(cuerpo)).body;
+    assert.deepEqual([data.severidad, data.semaforo, data.genera_alarma], esperado, JSON.stringify(data));
+    if (!data.genera_alarma) assert.ok(data.motivo);
+  }
+  assert.equal((await pool.query('SELECT count(*)::int n FROM sismos_detectados')).rows[0].n, antes);
+  // Simulacro rojo: crea la alerta marcada como simulacro y llega a las alarmas de todos.
+  const simular = (body) => api('/riesgos/simular', { method: 'POST', token: adminToken, body });
+  const rojo = await simular({ magnitud: 5.4, latitud: 4.5, longitud: -74.2, lugar: 'Simulacro de pruebas' });
+  assert.equal(rojo.status, 201, JSON.stringify(rojo.body));
+  const { alerta } = rojo.body.data;
+  assert.equal(alerta.semaforo, 'rojo');
+  assert.equal(alerta.fuente, 'PRUEBA');
+  assert.equal(alerta.tipo_alerta, 'Sismo');
+  assert.match(alerta.mensaje, /^SIMULACRO\. Sismo de magnitud 5\.4/);
+  const alarmas = await api('/alarmas', { token: studentToken });
+  assert.ok(alarmas.body.data.some((alarma) => alarma.id === `riesgo-${alerta.id_alerta}`));
+  // Dos simulacros seguidos en el mismo lugar no se agrupan entre sí.
+  const repetido = await simular({ magnitud: 5.4, latitud: 4.5, longitud: -74.2 });
+  assert.ok(repetido.body.data.alerta);
+  // Simulacro verde: se registra sin alerta.
+  const verde = await simular({ magnitud: 4.2, latitud: 6.5, longitud: -75.5 });
+  assert.equal(verde.body.data.alerta, null);
+  assert.equal(verde.body.data.evaluacion.semaforo, 'verde');
+  const sismo = (
+    await pool.query('SELECT fuente,id_alerta FROM sismos_detectados WHERE evento_id=$1', [verde.body.data.evento_id])
+  ).rows[0];
+  assert.deepEqual(sismo, { fuente: 'PRUEBA', id_alerta: null });
+  const historial = await api('/riesgos/sismos?limit=5', { token: adminToken });
+  assert.equal(historial.body.data[0].semaforo, 'verde');
+  assert.equal(historial.body.data[1].semaforo, 'rojo');
+  for (const id of [alerta.id_alerta, repetido.body.data.alerta.id_alerta])
+    await api(`/alertas/${id}/cerrar`, { method: 'PATCH', token: adminToken });
+});
+test('cambio de correo con código: contraseña, correo nuevo, intentos y uso único', async () => {
+  await pool.query('DELETE FROM api_rate_limits');
+  await pool.query(
+    `INSERT INTO usuarios(nombres_completos,tipo_documento,numero_documento,correo,contrasena,id_rol)
+    SELECT 'Persona Correo','CC','40001','antes@test.example',$1,id_rol FROM rol WHERE nombre_rol='Aprendiz'`,
+    [await bcrypt.hash(password, 4)],
+  );
+  const ingreso = await api('/auth/login', { method: 'POST', body: { documento: '40001', contrasena: password } });
+  const token = ingreso.body.data.access_token;
+  const solicitar = (body) => api('/auth/correo/solicitar', { method: 'POST', token, body });
+  const nuevo = 'despues@test.example';
+  assert.equal((await solicitar({ correo: nuevo, contrasena: 'incorrecta' })).body.error.code, 'INVALID_CREDENTIALS');
+  assert.equal((await solicitar({ correo: 'ANTES@test.example', contrasena: password })).body.error.code, 'SAME_EMAIL');
+  await pool.query('DELETE FROM api_rate_limits');
+  assert.equal((await solicitar({ correo: 'admin@test.example', contrasena: password })).body.error.code, 'EMAIL_IN_USE');
+  const pedido = await solicitar({ correo: nuevo, contrasena: password });
+  assert.equal(pedido.status, 202, JSON.stringify(pedido.body));
+  assert.match(pedido.body.data.message, /despues@test\.example/);
+  const { datos } = await ultimoCorreo();
+  assert.deepEqual([datos.to, datos.tipo], [nuevo, 'cambio_correo']);
+  assert.match(datos.codigo, /^[0-9]{6}$/);
+  // El correo de la cuenta no cambia hasta confirmar.
+  assert.equal((await api('/auth/me', { token })).body.data.correo, 'antes@test.example');
+  // El código de cambio de correo no sirve para recuperar la contraseña.
+  const cruzado = await api('/auth/validar-recuperacion', {
+    method: 'POST',
+    body: { correo: 'antes@test.example', codigo: datos.codigo },
+  });
+  assert.equal(cruzado.status, 400);
+  const confirmar = (codigo) => api('/auth/correo/confirmar', { method: 'POST', token, body: { codigo } });
+  const erroneo = datos.codigo === '000000' ? '111111' : '000000';
+  assert.equal((await confirmar(erroneo)).body.error.code, 'INVALID_RESET_CODE');
+  const intentos = await pool.query(
+    "SELECT intentos FROM password_reset_tokens WHERE proposito='cambio_correo' AND correo_nuevo=$1",
+    [nuevo],
+  );
+  assert.equal(intentos.rows[0].intentos, 1);
+  const confirmado = await confirmar(datos.codigo);
+  assert.equal(confirmado.status, 200, JSON.stringify(confirmado.body));
+  assert.equal(confirmado.body.data.correo, nuevo);
+  // Cambiar el correo revoca las sesiones (disparador de la base): se vuelve a ingresar.
+  assert.equal((await confirmar(datos.codigo)).status, 401);
+  const guardado = await pool.query("SELECT correo FROM usuarios WHERE numero_documento='40001'");
+  assert.equal(guardado.rows[0].correo, nuevo);
+  const otraVez = await api('/auth/login', { method: 'POST', body: { documento: '40001', contrasena: password } });
+  const usado = await api('/auth/correo/confirmar', {
+    method: 'POST',
+    token: otraVez.body.data.access_token,
+    body: { codigo: datos.codigo },
+  });
+  assert.equal(usado.status, 400);
+  assert.equal((await api('/auth/correo/confirmar', { method: 'POST', body: { codigo: datos.codigo } })).status, 401);
+});
+async function gmailSimulado() {
+  const recibido = { tokens: [], enviados: [] };
+  // Cada renovación entrega un access token distinto; revocar() simula que Google
+  // invalida los ya emitidos antes de que venzan, y sinId una respuesta incompleta.
+  const google = { emitidos: 0, revocados: new Set(), sinId: false };
+  const servidor = createServer(async (peticion, respuesta) => {
+    let texto = '';
+    for await (const parte of peticion) texto += parte;
+    const responderJson = (estado, datos) => {
+      respuesta.writeHead(estado, { 'Content-Type': 'application/json' });
+      respuesta.end(JSON.stringify(datos));
+    };
+    if (peticion.url === '/token') {
+      const formulario = new URLSearchParams(texto);
+      recibido.tokens.push(formulario.get('grant_type'));
+      if (formulario.get('refresh_token') === 'revocado')
+        return responderJson(400, { error: 'invalid_grant', error_description: 'Token has been expired or revoked.' });
+      google.emitidos += 1;
+      return responderJson(200, { access_token: `gmail-simulado-${google.emitidos}`, expires_in: 3600 });
+    }
+    const token = (peticion.headers.authorization ?? '').replace(/^Bearer /, '');
+    if (peticion.url === '/gmail/v1/users/me/messages/send' && token.startsWith('gmail-simulado-') && !google.revocados.has(token)) {
+      recibido.enviados.push(Buffer.from(JSON.parse(texto).raw, 'base64url').toString('utf8'));
+      return responderJson(200, google.sinId ? {} : { id: `mensaje-${recibido.enviados.length}` });
+    }
+    return responderJson(401, { error: { message: 'Request had invalid authentication credentials.' } });
+  });
+  await new Promise((resolver) => servidor.listen(0, '127.0.0.1', resolver));
+  return {
+    recibido,
+    google,
+    revocar: () => {
+      for (let numero = 1; numero <= google.emitidos; numero += 1) google.revocados.add(`gmail-simulado-${numero}`);
+    },
+    url: `http://127.0.0.1:${servidor.address().port}`,
+    cerrar: () => new Promise((resolver) => servidor.close(resolver)),
+  };
+}
+test('correo por Gmail API: diagnóstico, prueba de envío, causa exacta del fallo y cola entregada', async () => {
+  await pool.query('DELETE FROM api_rate_limits');
+  // Sin transporte configurado la prueba lo dice con un código propio.
+  const sinCorreo = await api('/correo/estado', { token: adminToken });
+  assert.deepEqual([sinCorreo.body.data.configurado, sinCorreo.body.data.transporte], [false, null]);
+  const prueba = (servidor, token = adminToken) =>
+    fetch(`${servidor}/api/v1/correo/prueba`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ destino: 'destino@test.example' }),
+    }).then(async (respuesta) => ({ status: respuesta.status, body: await respuesta.json() }));
+  assert.equal((await prueba(base)).body.error.code, 'MAIL_NOT_CONFIGURED');
+  assert.equal((await prueba(base, studentToken)).status, 403);
+  const gmail = await gmailSimulado();
+  const configGmail = {
+    ...config,
+    GMAIL_CLIENT_ID: 'cliente.apps.googleusercontent.com',
+    GMAIL_CLIENT_SECRET: 'secreto-de-prueba',
+    GMAIL_REFRESH_TOKEN: 'refresco-valido',
+    GMAIL_TOKEN_URL: `${gmail.url}/token`,
+    GMAIL_API_URL: gmail.url,
+  };
+  const conGmail = await iniciarFastApi(configGmail);
+  // Cada instancia corre su propio worker de correo sobre la misma base: solo una con
+  // Gmail válido queda viva mientras se prueba la cola, para que otra no tome el mensaje.
+  let revocado = await iniciarFastApi({ ...configGmail, GMAIL_REFRESH_TOKEN: 'revocado' });
+  let oficial = null;
+  try {
+    const estado = await fetch(`${conGmail.base}/api/v1/correo/estado`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    }).then((respuesta) => respuesta.json());
+    assert.equal(estado.data.transporte, 'gmail');
+    assert.equal(estado.data.remitente, 'La cuenta de Gmail autorizada');
+    const enviada = await prueba(conGmail.base);
+    assert.equal(enviada.status, 200, JSON.stringify(enviada.body));
+    const [mensaje] = gmail.recibido.enviados;
+    assert.match(mensaje, /^To: destino@test\.example$/m);
+    assert.match(mensaje, /^Subject: Prueba de correo de Xentinel$/m);
+    // Con el remitente de ejemplo, Gmail usa la cuenta autorizada: no se envía un From falso.
+    assert.doesNotMatch(mensaje, /^From:/m);
+    const fallida = await prueba(revocado.base);
+    assert.equal(fallida.status, 502);
+    assert.equal(fallida.body.error.code, 'MAIL_DELIVERY_FAILED');
+    assert.match(fallida.body.error.message, /GMAIL_AUTH: HTTP 400 invalid_grant: Token has been expired or revoked/);
+    assert.ok(!fallida.body.error.message.includes('secreto-de-prueba'));
+    await revocado.cerrar();
+    revocado = null;
+    // El worker entrega por Gmail API el código pedido desde la recuperación.
+    await pool.query('DELETE FROM mail_outbox');
+    await pool.query('DELETE FROM password_reset_tokens');
+    const pedido = await fetch(`${conGmail.base}/api/v1/auth/olvide-contrasena`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ correo: 'admin@test.example' }),
+    });
+    assert.equal(pedido.status, 202);
+    const limite = Date.now() + 15000;
+    while (gmail.recibido.enviados.length < 2) {
+      assert.ok(Date.now() < limite, `el worker no entregó el correo: ${conGmail.diagnostico()}`);
+      await new Promise((resolver) => setTimeout(resolver, 200));
+    }
+    assert.match(gmail.recibido.enviados[1], /^Subject: [0-9]{6} es tu /m);
+    const cola = (await pool.query('SELECT enviado_en,error_codigo,payload_encrypted FROM mail_outbox')).rows[0];
+    assert.ok(cola.enviado_en);
+    assert.equal(cola.error_codigo, null);
+    assert.equal(cola.payload_encrypted, null);
+
+    // Con SMTP_FROM de la cuenta oficial, el correo sale a nombre de Xentinel.
+    oficial = await iniciarFastApi({ ...configGmail, SMTP_FROM: 'xentinel@test.example' });
+    const desdeOficial = await prueba(oficial.base);
+    assert.equal(desdeOficial.status, 200, JSON.stringify(desdeOficial.body));
+    assert.match(gmail.recibido.enviados.at(-1), /^From: Xentinel <xentinel@test\.example>$/m);
+    // Google revoca el access token guardado antes de vencer: se renueva y se reintenta una vez.
+    const renovaciones = gmail.recibido.tokens.length;
+    const entregados = gmail.recibido.enviados.length;
+    gmail.revocar();
+    const trasRevocar = await prueba(oficial.base);
+    assert.equal(trasRevocar.status, 200, JSON.stringify(trasRevocar.body));
+    assert.equal(gmail.recibido.tokens.length, renovaciones + 1);
+    assert.equal(gmail.recibido.enviados.length, entregados + 1);
+    // Una respuesta 200 sin id no cuenta como enviada.
+    gmail.google.sinId = true;
+    const sinConfirmar = await prueba(oficial.base);
+    assert.equal(sinConfirmar.status, 502);
+    assert.match(sinConfirmar.body.error.message, /GMAIL_SEND: Gmail no confirmó el envío/);
+  } finally {
+    await oficial?.cerrar();
+    await conGmail.cerrar();
+    await revocado?.cerrar();
+    await gmail.cerrar();
   }
 });

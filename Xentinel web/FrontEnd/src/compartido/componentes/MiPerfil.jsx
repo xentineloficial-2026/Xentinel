@@ -1,5 +1,7 @@
-/** Perfil personal en dos tarjetas: foto y estado a la izquierda, datos y contraseña a la derecha. */
+/** Perfil personal: foto y estado a la izquierda; datos y seguridad de la cuenta a la derecha.
+ * La contraseña y el correo se cambian en diálogos propios, no en formularios fijos. */
 import { useRef as useReferencia, useState as useEstado } from 'react';
+import { KeyRound as Llave, Mail as Sobre } from 'lucide-react';
 import { useAutenticacion } from '../contextos/autenticacion.js';
 import { solicitar } from '../servicios/cliente.js';
 import { caducarSesion } from '../servicios/sesion.js';
@@ -7,25 +9,281 @@ import { useRecurso } from '../ganchos/useRecurso.js';
 import { errorContrasena } from '../servicios/recuperacion.js';
 import { MensajeEstado, EstadoConsulta } from './MensajeEstado.jsx';
 import { CampoContrasena } from './CampoContrasena.jsx';
+import { Dialogo } from './Dialogo.jsx';
 import { FotoPerfil } from './FotoPerfil.jsx';
 import { subirFoto } from '../servicios/fotos.js';
-function EditorPerfil({ usuario }) {
-  /* formulario, cambiarFormulario: estado de la vista y función para actualizarlo. */
-  const [formulario, cambiarFormulario] = useEstado({
-    nombres_completos: usuario.nombres_completos,
-    telefono: usuario.telefono || '',
-  });
-  /* contrasenas, cambiarContrasenas: estado de la vista y función para actualizarlo. */
-  const [contrasenas, cambiarContrasenas] = useEstado({
+
+/** Requisitos visibles mientras se escribe: la persona sabe qué falta antes de enviar. */
+function Requisitos({ elementos }) {
+  return (
+    <ul className="xn-requisitos" aria-label="Requisitos de la nueva contraseña">
+      {elementos.map(([texto, cumplido]) => (
+        <li key={texto} className={cumplido ? 'es-cumplido' : undefined}>
+          <span aria-hidden="true" />
+          {texto}
+          <span className="xn-solo-lectores">
+            {cumplido ? ' (cumplido)' : ' (pendiente)'}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function DialogoContrasena({ alCerrar }) {
+  const [valores, cambiarValores] = useEstado({
     actual: '',
     nueva: '',
     confirmacion: '',
   });
-  /* retroalimentacion, cambiarRetroalimentacion: estado de la vista y función para actualizarlo. */
-  const [retroalimentacion, cambiarRetroalimentacion] = useEstado({});
-  /* guardando, cambiarGuardando: estado de la vista y función para actualizarlo. */
+  const [error, cambiarError] = useEstado(null);
   const [guardando, cambiarGuardando] = useEstado(false);
-  /* ocupado: referencia estable entre renderizados, sin disparar una actualización visual. */
+  const ocupado = useReferencia(false);
+  const cambiar = (clave) => (evento) =>
+    cambiarValores({ ...valores, [clave]: evento.target.value });
+  const largoValido = !errorContrasena(valores.nueva);
+  const distinta = valores.nueva.length > 0 && valores.nueva !== valores.actual;
+  const coinciden =
+    valores.confirmacion.length > 0 && valores.nueva === valores.confirmacion;
+  const enviar = async (evento) => {
+    evento.preventDefault();
+    if (ocupado.current) return;
+    const problema = !valores.actual
+      ? 'Escribe tu contraseña actual.'
+      : errorContrasena(valores.nueva) ||
+        (!distinta && 'La nueva contraseña debe ser distinta de la actual.') ||
+        (!coinciden && 'La confirmación no coincide con la nueva contraseña.');
+    if (problema) {
+      cambiarError(problema);
+      return;
+    }
+    ocupado.current = true;
+    cambiarGuardando(true);
+    cambiarError(null);
+    try {
+      await solicitar('/auth/contrasena', {
+        method: 'PUT',
+        body: { actual: valores.actual, nueva: valores.nueva },
+      });
+      caducarSesion('Contraseña actualizada. Ingresa con tu nueva contraseña.');
+    } catch (motivo) {
+      cambiarError(motivo);
+      ocupado.current = false;
+      cambiarGuardando(false);
+    }
+  };
+  return (
+    <Dialogo
+      titulo="Cambiar contraseña"
+      alCerrar={alCerrar}
+      ocupado={guardando}
+      estrecho
+    >
+      <p>
+        Al guardarla cerramos tu sesión en este navegador y en la app. Vuelve a
+        ingresar con la contraseña nueva.
+      </p>
+      <form noValidate onSubmit={enviar} className="xn-formulario-dialogo">
+        <CampoContrasena
+          identificador="clave-actual"
+          etiqueta="Contraseña actual"
+          autocompletado="current-password"
+          valor={valores.actual}
+          alCambiar={cambiar('actual')}
+          enfocar
+        />
+        <CampoContrasena
+          identificador="clave-nueva"
+          etiqueta="Nueva contraseña"
+          valor={valores.nueva}
+          alCambiar={cambiar('nueva')}
+        />
+        <Requisitos
+          elementos={[
+            ['Al menos 6 caracteres', largoValido && valores.nueva.length > 0],
+            ['Distinta de la actual', distinta],
+            ['Las dos contraseñas coinciden', coinciden],
+          ]}
+        />
+        <CampoContrasena
+          identificador="clave-confirmacion"
+          etiqueta="Confirmar nueva contraseña"
+          valor={valores.confirmacion}
+          alCambiar={cambiar('confirmacion')}
+        />
+        <MensajeEstado error={error} />
+        <div className="xn-dialogo-acciones">
+          <button
+            type="button"
+            className="xn-boton xn-boton--secundario"
+            onClick={alCerrar}
+            disabled={guardando}
+          >
+            Cancelar
+          </button>
+          <button className="xn-boton" disabled={guardando}>
+            {guardando ? 'Guardando…' : 'Guardar contraseña'}
+          </button>
+        </div>
+      </form>
+    </Dialogo>
+  );
+}
+
+/** Dos pasos: el código llega al correo nuevo y prueba que la dirección es de la persona. */
+function DialogoCorreo({ correoActual, alCerrar }) {
+  const [paso, cambiarPaso] = useEstado('pedir');
+  const [correo, cambiarCorreo] = useEstado('');
+  const [contrasena, cambiarContrasena] = useEstado('');
+  const [codigo, cambiarCodigo] = useEstado('');
+  const [aviso, cambiarAviso] = useEstado({});
+  const [guardando, cambiarGuardando] = useEstado(false);
+  const ocupado = useReferencia(false);
+  const ejecutar = async (tarea) => {
+    if (ocupado.current) return;
+    ocupado.current = true;
+    cambiarGuardando(true);
+    cambiarAviso({});
+    try {
+      await tarea();
+    } catch (error) {
+      cambiarAviso({ error });
+    } finally {
+      ocupado.current = false;
+      cambiarGuardando(false);
+    }
+  };
+  const pedirCodigo = (evento) => {
+    evento?.preventDefault();
+    const limpio = correo.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(limpio)) {
+      cambiarAviso({ error: 'Escribe un correo válido, como nombre@dominio.co.' });
+      return;
+    }
+    if (!contrasena) {
+      cambiarAviso({ error: 'Escribe tu contraseña actual para confirmar que eres tú.' });
+      return;
+    }
+    ejecutar(async () => {
+      const { data } = await solicitar('/auth/correo/solicitar', {
+        method: 'POST',
+        body: { correo: limpio, contrasena },
+      });
+      cambiarCorreo(limpio);
+      cambiarCodigo('');
+      cambiarPaso('confirmar');
+      cambiarAviso({ mensaje: data.message });
+    });
+  };
+  const confirmar = (evento) => {
+    evento.preventDefault();
+    if (!/^[0-9]{6}$/.test(codigo)) {
+      cambiarAviso({ error: 'El código tiene 6 dígitos.' });
+      return;
+    }
+    ejecutar(async () => {
+      await solicitar('/auth/correo/confirmar', {
+        method: 'POST',
+        body: { codigo },
+      });
+      caducarSesion(`Tu correo ahora es ${correo}. Ingresa de nuevo para continuar.`);
+    });
+  };
+  return (
+    <Dialogo
+      titulo="Cambiar correo"
+      alCerrar={alCerrar}
+      ocupado={guardando}
+      estrecho
+    >
+      {paso === 'pedir' ? (
+        <form noValidate onSubmit={pedirCodigo} className="xn-formulario-dialogo">
+          <p>
+            {correoActual
+              ? `Hoy recibes los avisos en ${correoActual}. `
+              : 'Tu cuenta no tiene correo. '}
+            Te enviaremos un código al correo nuevo para confirmarlo.
+          </p>
+          <div className="xn-campo">
+            <label htmlFor="correo-nuevo">Correo nuevo</label>
+            <input
+              id="correo-nuevo"
+              type="email"
+              autoComplete="email"
+              data-initial-focus
+              value={correo}
+              onChange={(evento) => cambiarCorreo(evento.target.value)}
+            />
+          </div>
+          <CampoContrasena
+            identificador="correo-clave"
+            etiqueta="Contraseña actual"
+            autocompletado="current-password"
+            valor={contrasena}
+            alCambiar={(evento) => cambiarContrasena(evento.target.value)}
+          />
+          <MensajeEstado {...aviso} />
+          <div className="xn-dialogo-acciones">
+            <button
+              type="button"
+              className="xn-boton xn-boton--secundario"
+              onClick={alCerrar}
+              disabled={guardando}
+            >
+              Cancelar
+            </button>
+            <button className="xn-boton" disabled={guardando}>
+              {guardando ? 'Enviando…' : 'Enviar código'}
+            </button>
+          </div>
+        </form>
+      ) : (
+        <form noValidate onSubmit={confirmar} className="xn-formulario-dialogo">
+          <MensajeEstado {...aviso} />
+          <div className="xn-campo">
+            <label htmlFor="correo-codigo">Código de 6 dígitos</label>
+            <input
+              id="correo-codigo"
+              className="xn-codigo-entrada"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              data-initial-focus
+              value={codigo}
+              onChange={(evento) =>
+                cambiarCodigo(evento.target.value.replace(/\D/g, '').slice(0, 6))
+              }
+            />
+            <small>¿No llegó? Revisa la carpeta de spam o pide otro código.</small>
+          </div>
+          <div className="xn-dialogo-acciones">
+            <button
+              type="button"
+              className="xn-boton xn-boton--secundario"
+              onClick={() => pedirCodigo()}
+              disabled={guardando}
+            >
+              Pedir otro código
+            </button>
+            <button className="xn-boton" disabled={guardando}>
+              {guardando ? 'Confirmando…' : 'Confirmar correo'}
+            </button>
+          </div>
+        </form>
+      )}
+    </Dialogo>
+  );
+}
+
+function EditorPerfil({ usuario }) {
+  const [formulario, cambiarFormulario] = useEstado({
+    nombres_completos: usuario.nombres_completos,
+    telefono: usuario.telefono || '',
+  });
+  const [retroalimentacion, cambiarRetroalimentacion] = useEstado({});
+  const [guardando, cambiarGuardando] = useEstado(false);
+  /* dialogo: «contrasena» o «correo» mientras uno de los dos está abierto. */
+  const [dialogo, cambiarDialogo] = useEstado(null);
   const ocupado = useReferencia(false);
   /* fotoUrl: cambia al subir una foto nueva para mostrarla sin recargar. */
   const [fotoUrl, cambiarFotoUrl] = useEstado(usuario.foto_url);
@@ -44,54 +302,25 @@ function EditorPerfil({ usuario }) {
       cambiarSubiendo(false);
     }
   };
-  /* enviar: operación local que atiende el evento o transforma la información. */
-  const enviar = async (evento, cambioContrasena) => {
+  const enviar = async (evento) => {
     evento.preventDefault();
     if (ocupado.current) return;
     cambiarRetroalimentacion({});
-    if (
-      cambioContrasena &&
-      (!contrasenas.actual ||
-        errorContrasena(contrasenas.nueva) ||
-        contrasenas.nueva !== contrasenas.confirmacion)
-    ) {
-      cambiarRetroalimentacion({
-        error: !contrasenas.actual
-          ? 'Ingresa tu contraseña actual.'
-          : errorContrasena(contrasenas.nueva) ||
-            'Las contraseñas no coinciden.',
-      });
-      return;
-    }
-    if (!cambioContrasena && formulario.nombres_completos.trim().length < 2) {
-      cambiarRetroalimentacion({
-        error: 'Escribe tu nombre completo.',
-      });
+    if (formulario.nombres_completos.trim().length < 2) {
+      cambiarRetroalimentacion({ error: 'Escribe tu nombre completo.' });
       document.getElementById('profile-name').focus();
       return;
     }
     ocupado.current = true;
     cambiarGuardando(true);
     try {
-      await solicitar(
-        cambioContrasena
-          ? '/auth/contrasena'
-          : `/usuarios/${usuario.id_usuarios}`,
-        {
-          method: cambioContrasena ? 'PUT' : 'PATCH',
-          body: cambioContrasena
-            ? {
-                actual: contrasenas.actual,
-                nueva: contrasenas.nueva,
-              }
-            : formulario,
-        }
-      );
-      caducarSesion();
-    } catch (error) {
-      cambiarRetroalimentacion({
-        error,
+      await solicitar(`/usuarios/${usuario.id_usuarios}`, {
+        method: 'PATCH',
+        body: formulario,
       });
+      caducarSesion('Guardamos tus datos. Inicia sesión de nuevo para verlos.');
+    } catch (error) {
+      cambiarRetroalimentacion({ error });
     } finally {
       ocupado.current = false;
       cambiarGuardando(false);
@@ -121,7 +350,7 @@ function EditorPerfil({ usuario }) {
         <div className="xn-perfil-columna">
           <section className="xn-trabajo-tarjeta">
             <h2>Tu información</h2>
-            <form noValidate onSubmit={(evento) => enviar(evento, false)}>
+            <form noValidate onSubmit={enviar}>
               <div className="xn-formulario-cuadricula">
                 <div className="xn-campo">
                   <label htmlFor="profile-name">Nombre completo</label>
@@ -160,10 +389,6 @@ function EditorPerfil({ usuario }) {
                     readOnly
                   />
                 </div>
-                <div className="xn-campo">
-                  <label htmlFor="profile-email">Correo electrónico</label>
-                  <input id="profile-email" value={usuario.correo} readOnly />
-                </div>
               </div>
               <p className="xn-ayuda">
                 Al guardar, inicia sesión nuevamente para proteger tu cuenta.
@@ -176,52 +401,55 @@ function EditorPerfil({ usuario }) {
             </form>
           </section>
           <section className="xn-trabajo-tarjeta">
-            <h2>Contraseña</h2>
-            <form noValidate onSubmit={(evento) => enviar(evento, true)}>
-              <div className="xn-formulario-cuadricula">
-                {[
-                  ['actual', 'Contraseña actual'],
-                  ['nueva', 'Nueva contraseña'],
-                  ['confirmacion', 'Confirmar contraseña'],
-                ].map(([clave, etiqueta]) => (
-                  <CampoContrasena
-                    key={clave}
-                    identificador={`profile-${clave}`}
-                    etiqueta={etiqueta}
-                    autocompletado={
-                      clave === 'actual' ? 'current-password' : 'new-password'
-                    }
-                    valor={contrasenas[clave]}
-                    alCambiar={(evento) =>
-                      cambiarContrasenas({
-                        ...contrasenas,
-                        [clave]: evento.target.value,
-                      })
-                    }
-                    ayuda={
-                      clave === 'nueva'
-                        ? 'Al menos 6 caracteres y máximo 72 bytes UTF-8.'
-                        : undefined
-                    }
-                  />
-                ))}
-              </div>
-              <div className="xn-perfil-acciones">
-                <button className="xn-boton" disabled={guardando}>
-                  {guardando ? 'Guardando…' : 'Cambiar contraseña'}
+            <h2>Acceso a tu cuenta</h2>
+            <ul className="xn-seguridad">
+              <li>
+                <Sobre size={20} aria-hidden="true" />
+                <div>
+                  <strong>Correo electrónico</strong>
+                  <span>{usuario.correo || 'Sin correo registrado'}</span>
+                </div>
+                <button
+                  type="button"
+                  className="xn-boton xn-boton--secundario"
+                  onClick={() => cambiarDialogo('correo')}
+                >
+                  Cambiar correo
                 </button>
-              </div>
-            </form>
+              </li>
+              <li>
+                <Llave size={20} aria-hidden="true" />
+                <div>
+                  <strong>Contraseña</strong>
+                  <span>La usas para ingresar en la web y en la app.</span>
+                </div>
+                <button
+                  type="button"
+                  className="xn-boton xn-boton--secundario"
+                  onClick={() => cambiarDialogo('contrasena')}
+                >
+                  Cambiar contraseña
+                </button>
+              </li>
+            </ul>
           </section>
         </div>
       </div>
+      {dialogo === 'contrasena' && (
+        <DialogoContrasena alCerrar={() => cambiarDialogo(null)} />
+      )}
+      {dialogo === 'correo' && (
+        <DialogoCorreo
+          correoActual={usuario.correo}
+          alCerrar={() => cambiarDialogo(null)}
+        />
+      )}
     </>
   );
 }
+
 function MiPerfil() {
-  /* usuario: valor de trabajo utilizado en esta operación. */
   const { usuario } = useAutenticacion();
-  /* perfil: consulta cancelable al servidor, con datos, estado y reintento. */
   const perfil = useRecurso(`/usuarios/${usuario.id_usuarios}`);
   return (
     <>

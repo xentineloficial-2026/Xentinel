@@ -8,13 +8,14 @@ import 'package:xentinel/models/emergency_alert.dart';
 EmergencyAlert alert({
   AlertSeverity severity = AlertSeverity.critica,
   String type = 'Sismo',
+  String source = 'Centro de control',
 }) => EmergencyAlert(
   id: 1,
   type: type,
   message: 'Evacúa por la salida más cercana.',
   severity: severity,
   startedAt: DateTime(2026, 11, 5, 8, 30),
-  source: 'Centro de control',
+  source: source,
 );
 
 /// Luminancia relativa WCAG para comprobar el contraste de la emergencia.
@@ -62,6 +63,13 @@ void main() {
 
   testWidgets('drills say clearly that they are not real', (tester) async {
     await mount(tester, alert(type: 'Simulacro'));
+    expect(find.text('Simulacro. No es una emergencia real.'), findsOneWidget);
+  });
+
+  testWidgets('risk API drills (source PRUEBA) are marked as drills too', (
+    tester,
+  ) async {
+    await mount(tester, alert(source: 'PRUEBA'));
     expect(find.text('Simulacro. No es una emergencia real.'), findsOneWidget);
   });
 

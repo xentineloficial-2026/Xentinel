@@ -20,7 +20,7 @@ En otros sistemas, el intérprete del entorno virtual está en `.venv/bin/python
 - Haga respaldo antes de migrar una base en uso. `migrar` usa los mismos archivos SQL, versiones y checksums que Express. Si una versión ya está aplicada se verifica y se omite. El SQL completo se reserva para instalaciones nuevas o para el dump original restaurado. Se regenera con `python -m xentinel exportar-sql`.
 - Detenga Express antes de iniciar FastAPI en el mismo puerto. El proxy Vite existente sigue apuntando a `127.0.0.1:8000`. Para la reversión operativa, detenga FastAPI y arranque Express con `npm run legacy:start`, con sus dependencias Node instaladas.
 
-Con el servidor iniciado, visite `/health`, `/ready` y `/docs`. El contrato en formato JSON está en `/openapi.json`. Para una integración externa use [el contrato Web y móvil](docs/API.md).
+Con el servidor iniciado, visite `/health`, `/ready` y `/docs`. Para comprobar el correo: `python -m xentinel probar-correo <destino>`. El contrato en formato JSON está en `/openapi.json`. Para una integración externa use [el contrato Web y móvil](docs/API.md).
 
 ## Módulos
 
@@ -34,6 +34,8 @@ Con el servidor iniciado, visite `/health`, `/ready` y `/docs`. El contrato en f
 | `xentinel/alertas.py`, `eventos.py`                                | Alertas, SOS, pase de lista y sincronización WebSocket/SSE                |
 | `xentinel/credenciales.py`                                         | Carnet QR rotativo firmado (XN2): emisión, firma y verificación           |
 | `xentinel/sismos.py`, `push.py`, `google.py`                      | Monitor sísmico EMSC/USGS, Firebase Cloud Messaging y Gmail API           |
+| `xentinel/semaforo.py`, `alarmas.py`, `riesgos.py`                 | Semáforo, alarmas (riesgos y QR) y API de gestión de riesgos ([guía](docs/RIESGOS.md)) |
+| `xentinel/estado_correo.py`                                        | Estado y prueba de envío del correo ([guía](docs/CORREO.md))              |
 | `sql/`, `public/`, `clients/`                                      | Esquema, recuperación y cliente JS compartidos                            |
 | `src/`, `scripts/`, `test/`                                        | Respaldo de Express y pruebas de compatibilidad                           |
 

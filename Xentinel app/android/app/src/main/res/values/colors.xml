@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_launcher_background">#06141B</color>
+    <!-- Tinta de Xentinel (lib/core/theme.dart): fondo del arranque y de la ventana. -->
+    <color name="xn_tinta">#06141B</color>
+</resources>

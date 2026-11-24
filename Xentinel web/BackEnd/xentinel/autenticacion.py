@@ -100,6 +100,15 @@ class CambioClave(Entrada):
     nueva: Clave
 
 
+class SolicitudCambioCorreo(Entrada):
+    correo: Correo
+    contrasena: ClaveActual
+
+
+class ConfirmacionCambioCorreo(Entrada):
+    codigo: CodigoRecuperacion
+
+
 def insertar_usuario(db, datos, hash_guardado, rol):
     creado = db.fila(
         """INSERT INTO usuarios(nombres_completos,tipo_documento,numero_documento,
@@ -239,6 +248,20 @@ def hash_codigo(config, identificador, codigo):
     return hmac.new(clave, f"{identificador}:{codigo}".encode(), sha256).hexdigest()
 
 
+def correo_no_configurado():
+    return ErrorAPI(
+        503,
+        "MAIL_NOT_CONFIGURED",
+        "El envío de correos no está disponible en este momento. Pide ayuda a "
+        "administración para recuperar el acceso.",
+    )
+
+
+def enlace_web(config, fragmento=""):
+    """Dirección de la web (la de RESET_PASSWORD_URL) para incluirla en el correo."""
+    return urlsplit(config.RESET_PASSWORD_URL)._replace(fragment=fragmento).geturl()
+
+
 def codigo_invalido():
     return ErrorAPI(
         400,
@@ -267,8 +290,8 @@ def comprobar_codigo(conexion, config, correo, codigo, consumir):
     identificador = usuario["id_usuarios"]
     token = conexion.fila(
         """SELECT id_token,token_hash FROM password_reset_tokens WHERE id_usuarios=%s
-        AND usado_en IS NULL AND token_expiracion>now() AND intentos<%s
-        ORDER BY id_token DESC LIMIT 1 FOR UPDATE""",
+        AND proposito='recuperacion' AND usado_en IS NULL AND token_expiracion>now()
+        AND intentos<%s ORDER BY id_token DESC LIMIT 1 FOR UPDATE""",
         identificador,
         MAXIMO_INTENTOS_CODIGO,
     )
@@ -296,7 +319,7 @@ def comprobar_codigo(conexion, config, correo, codigo, consumir):
 def solicitar_recuperacion(datos: SolicitudRecuperacion, db: Base, solicitud: Request):
     config = solicitud.app.state.configuracion
     if not config.correo_configurado and config.NODE_ENV != "test":
-        raise ErrorAPI(503, "INTERNAL_ERROR", "No se pudo completar la solicitud")
+        raise correo_no_configurado()
     # Por correo, exista o no la cuenta: limita el abuso sin revelar qué correos existen.
     contar_peticion(db, datos.correo, "reset-correo", SOLICITUDES_POR_CORREO, 900)
     with db.transaccion() as conexion:
@@ -309,13 +332,14 @@ def solicitar_recuperacion(datos: SolicitudRecuperacion, db: Base, solicitud: Re
             identificador = usuario["id_usuarios"]
             reciente = conexion.fila(
                 """SELECT id_token FROM password_reset_tokens WHERE id_usuarios=%s
-                AND creado_en>now()-interval '1 minute' LIMIT 1""",
+                AND proposito='recuperacion' AND creado_en>now()-interval '1 minute' LIMIT 1""",
                 identificador,
             )
             if not reciente:
                 # Un código nuevo reemplaza a los anteriores (y su correo pendiente).
                 conexion.ejecutar(
-                    "DELETE FROM password_reset_tokens WHERE id_usuarios=%s",
+                    """DELETE FROM password_reset_tokens
+                    WHERE id_usuarios=%s AND proposito='recuperacion'""",
                     identificador,
                 )
                 codigo = f"{randbelow(1_000_000):06d}"
@@ -326,16 +350,17 @@ def solicitar_recuperacion(datos: SolicitudRecuperacion, db: Base, solicitud: Re
                     hash_codigo(config, identificador, codigo),
                     config.RESET_TTL_MINUTES,
                 )
-                enlace = (
-                    urlsplit(config.RESET_PASSWORD_URL)
-                    ._replace(fragment=urlencode({"correo": usuario["correo"]}))
-                    .geturl()
-                )
+                enlace = enlace_web(config, urlencode({"correo": usuario["correo"]}))
                 conexion.ejecutar(
                     "INSERT INTO mail_outbox(id_token,payload_encrypted) VALUES(%s,%s)",
                     creado["id_token"],
                     cifrar_correo(
-                        {"to": usuario["correo"], "codigo": codigo, "link": enlace},
+                        {
+                            "to": usuario["correo"],
+                            "codigo": codigo,
+                            "link": enlace,
+                            "tipo": "recuperacion",
+                        },
                         config,
                     ),
                 )
@@ -405,3 +430,138 @@ def cambiar_clave(datos: CambioClave, db: Base, sesion: SesionActual):
         )
         invalidar_tokens(conexion, sesion.id)
     return Response(status_code=204)
+
+
+@rutas.post("/auth/correo/solicitar", status_code=202)
+def solicitar_cambio_correo(
+    datos: SolicitudCambioCorreo, db: Base, solicitud: Request, sesion: SesionActual
+):
+    """Envía un código de 6 dígitos al correo nuevo para comprobar que es de la persona.
+
+    Exige la contraseña actual. El correo de la cuenta no cambia hasta confirmar el código
+    en ``POST /auth/correo/confirmar``.
+    """
+    config = solicitud.app.state.configuracion
+    if not config.correo_configurado and config.NODE_ENV != "test":
+        raise correo_no_configurado()
+    contar_peticion(
+        db, f"usuario:{sesion.id}", "cambio-correo", SOLICITUDES_POR_CORREO, 900
+    )
+    with db.transaccion() as conexion:
+        usuario = conexion.fila(
+            """SELECT contrasena,auth_version,correo FROM usuarios
+            WHERE id_usuarios=%s FOR UPDATE""",
+            sesion.id,
+        )
+        if (
+            not usuario
+            or usuario["auth_version"] != sesion.token["ver"]
+            or not comprobar_clave(datos.contrasena, usuario["contrasena"])
+        ):
+            raise ErrorAPI(
+                401, "INVALID_CREDENTIALS", "La contraseña actual no es correcta"
+            )
+        if (usuario["correo"] or "").strip().lower() == datos.correo:
+            raise ErrorAPI(409, "SAME_EMAIL", "Ese ya es el correo de tu cuenta")
+        if conexion.fila(
+            """SELECT 1 FROM usuarios WHERE lower(btrim(correo))=%s AND id_usuarios<>%s""",
+            datos.correo,
+            sesion.id,
+        ):
+            raise ErrorAPI(
+                409, "EMAIL_IN_USE", "Ese correo ya está registrado en otra cuenta"
+            )
+        # Un código nuevo reemplaza al anterior (y a su correo pendiente).
+        conexion.ejecutar(
+            """DELETE FROM password_reset_tokens
+            WHERE id_usuarios=%s AND proposito='cambio_correo'""",
+            sesion.id,
+        )
+        codigo = f"{randbelow(1_000_000):06d}"
+        creado = conexion.fila(
+            """INSERT INTO password_reset_tokens(id_usuarios,token_hash,token_expiracion,
+            proposito,correo_nuevo) VALUES(%s,%s,now()+make_interval(mins=>%s),
+            'cambio_correo',%s) RETURNING id_token""",
+            sesion.id,
+            hash_codigo(config, f"correo:{sesion.id}", codigo),
+            config.RESET_TTL_MINUTES,
+            datos.correo,
+        )
+        conexion.ejecutar(
+            "INSERT INTO mail_outbox(id_token,payload_encrypted) VALUES(%s,%s)",
+            creado["id_token"],
+            cifrar_correo(
+                {
+                    "to": datos.correo,
+                    "codigo": codigo,
+                    "link": enlace_web(config),
+                    "tipo": "cambio_correo",
+                },
+                config,
+            ),
+        )
+    return responder(
+        {
+            "message": f"Enviamos un código de 6 dígitos a {datos.correo}. "
+            f"Vence en {config.RESET_TTL_MINUTES} minutos.",
+            "correo": datos.correo,
+        },
+        202,
+    )
+
+
+@rutas.post("/auth/correo/confirmar")
+def confirmar_cambio_correo(
+    datos: ConfirmacionCambioCorreo, db: Base, solicitud: Request, sesion: SesionActual
+):
+    """Cambia el correo de la cuenta si el código es correcto (5 intentos, uso único).
+
+    Como al cambiar la contraseña, la base revoca las sesiones abiertas de la persona:
+    después de confirmar, la web y la app piden ingresar de nuevo.
+    """
+    config = solicitud.app.state.configuracion
+    nuevo = None
+    with db.transaccion() as conexion:
+        token = conexion.fila(
+            """SELECT id_token,token_hash,correo_nuevo FROM password_reset_tokens
+            WHERE id_usuarios=%s AND proposito='cambio_correo' AND usado_en IS NULL
+            AND token_expiracion>now() AND intentos<%s
+            ORDER BY id_token DESC LIMIT 1 FOR UPDATE""",
+            sesion.id,
+            MAXIMO_INTENTOS_CODIGO,
+        )
+        if token and hmac.compare_digest(
+            token["token_hash"],
+            hash_codigo(config, f"correo:{sesion.id}", datos.codigo),
+        ):
+            conexion.ejecutar(
+                "UPDATE password_reset_tokens SET usado_en=now() WHERE id_token=%s",
+                token["id_token"],
+            )
+            if conexion.fila(
+                """SELECT 1 FROM usuarios WHERE lower(btrim(correo))=%s
+                AND id_usuarios<>%s""",
+                token["correo_nuevo"],
+                sesion.id,
+            ):
+                raise ErrorAPI(
+                    409, "EMAIL_IN_USE", "Ese correo ya está registrado en otra cuenta"
+                )
+            # El disparador de la base anula cualquier código de recuperación pendiente.
+            conexion.ejecutar(
+                "UPDATE usuarios SET correo=%s WHERE id_usuarios=%s",
+                token["correo_nuevo"],
+                sesion.id,
+            )
+            nuevo = usuario_por_id(conexion, sesion.id)
+        elif token:
+            conexion.ejecutar(
+                """UPDATE password_reset_tokens SET intentos=intentos+1,
+                usado_en=CASE WHEN intentos+1>=%s THEN now() END WHERE id_token=%s""",
+                MAXIMO_INTENTOS_CODIGO,
+                token["id_token"],
+            )
+    # Fuera de la transacción: el intento fallido queda registrado aunque se responda 400.
+    if not nuevo:
+        raise codigo_invalido()
+    return responder(usuario_publico(nuevo))

@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
 from psycopg import sql
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from .accesos import AULA_DE_FICHA, SITUACIONES_RETIRO
 from .http import (
@@ -19,17 +19,26 @@ from .http import (
     responder,
 )
 from .programas import Hora
-from .seguridad import Administrador, InstructorOAdmin, SesionActual, es_admin
+from .seguridad import (
+    Administrador,
+    InstructorOAdmin,
+    SesionActual,
+    es_admin,
+    nombre_rol,
+)
 
 rutas = APIRouter(tags=["Catálogos"])
 reportes = APIRouter(prefix="/reportes", tags=["Reportes administrativos"])
 Cursor = Annotated[int, Query(ge=0, le=ENTERO_MAXIMO)]
+# Fichas y horarios tienen rutas propias: cada rol ve solo lo que le corresponde.
 CATALOGOS = {
     "roles": ("rol", "id_rol"),
-    "fichas": ("ficha", "id_ficha"),
     "jornadas": ("jornada", "id_jornada"),
-    "horarios": ("horarios", "id_horario"),
 }
+# Fichas en las que la persona es aprendiz activo (misma regla que /usuarios/{id}/fichas).
+FICHAS_DE_APRENDIZ = """SELECT id_ficha FROM aprendiz_ficha WHERE id_usuarios=%(id)s
+    AND fechasalida IS NULL
+    AND lower(estado) NOT IN ('inactivo','retirado','finalizado','cancelado','desertado')"""
 
 
 def ruta_catalogo(tabla, clave):
@@ -54,6 +63,57 @@ for segmento, (tabla, clave) in CATALOGOS.items():
     )
 
 
+def alcance(sesion):
+    """«todos» para administración, «instructor» para quien dicta clases y «fichas» para
+    los demás (aprendices y visitantes con ficha)."""
+    if es_admin(sesion.usuario):
+        return "todos"
+    return "instructor" if nombre_rol(sesion.usuario) == "instructor" else "fichas"
+
+
+def consultar(db, consulta, parametros):
+    with db.transaccion() as conexion, conexion.conexion.cursor() as cursor:
+        return cursor.execute(consulta, parametros).fetchall()
+
+
+@rutas.get("/horarios")
+def horarios(db: Base, pagina: Paginacion, sesion: SesionActual):
+    """Calendario personal. El instructor ve solo las clases que él dicta, nunca las de
+    otros instructores ni el horario general; el aprendiz, las de sus fichas activas."""
+    visible = alcance(sesion)
+    filas = consultar(
+        db,
+        f"""SELECT h.*,f.numero_ficha,p.nombre_programa FROM horarios h
+        JOIN ficha f ON f.id_ficha=h.id_ficha
+        LEFT JOIN programa p ON p.id_programa=f.id_programa
+        WHERE %(alcance)s='todos'
+        OR (%(alcance)s='instructor' AND h.id_instructor=%(id)s)
+        OR (%(alcance)s='fichas' AND h.id_ficha IN ({FICHAS_DE_APRENDIZ}))
+        ORDER BY h.id_horario LIMIT %(limit)s OFFSET %(offset)s""",
+        {"alcance": visible, "id": sesion.id, **pagina},
+    )
+    return responder(filas, meta={**pagina, "alcance": visible})
+
+
+@rutas.get("/fichas")
+def fichas(db: Base, pagina: Paginacion, sesion: SesionActual):
+    """Administración ve todas las fichas; el instructor, las que tiene asignadas o en las
+    que dicta clase; el aprendiz, las suyas."""
+    visible = alcance(sesion)
+    filas = consultar(
+        db,
+        f"""SELECT f.* FROM ficha f
+        WHERE %(alcance)s='todos'
+        OR (%(alcance)s='instructor' AND (f.id_ficha IN (SELECT id_ficha FROM instructor_ficha
+            WHERE id_usuarios=%(id)s AND lower(estado)='activo')
+            OR f.id_ficha IN (SELECT id_ficha FROM horarios WHERE id_instructor=%(id)s)))
+        OR (%(alcance)s='fichas' AND f.id_ficha IN ({FICHAS_DE_APRENDIZ}))
+        ORDER BY f.id_ficha LIMIT %(limit)s OFFSET %(offset)s""",
+        {"alcance": visible, "id": sesion.id, **pagina},
+    )
+    return responder(filas, meta={**pagina, "alcance": visible})
+
+
 @rutas.get("/asistencias")
 def asistencias(db: Base, pagina: Paginacion, sesion: SesionActual):
     usuario = None if es_admin(sesion.usuario) else sesion.id
@@ -72,9 +132,12 @@ def asistencias(db: Base, pagina: Paginacion, sesion: SesionActual):
     )
 
 
-# Presente, Retrasado o Sin registro, también para filas antiguas que aún no se migraron.
+# Presente, Retardo, Ausente o Sin registro, también para filas antiguas sin migrar
+# («Retrasado», «Tarde»). Sin registro: día sin escaneo que nadie calificó todavía.
+ESTADOS_ASISTENCIA = ("Presente", "Retardo", "Ausente", "Sin registro")
 ESTADO_ASISTENCIA = """CASE WHEN x.id_asistencia IS NULL OR x.estado='Sin registro' THEN 'Sin registro'
-    WHEN x.estado ILIKE '%%tard%%' OR x.estado ILIKE '%%retra%%' THEN 'Retrasado'
+    WHEN x.estado ILIKE 'ausen%%' THEN 'Ausente'
+    WHEN x.estado ILIKE '%%tard%%' OR x.estado ILIKE '%%retra%%' THEN 'Retardo'
     ELSE 'Presente' END"""
 APRENDICES_ACTIVOS = """af.fechasalida IS NULL
     AND lower(af.estado) NOT IN ('inactivo','retirado','finalizado','cancelado','desertado')
@@ -262,19 +325,21 @@ def asistencia_por_periodo(
                 "numero_documento": fila["numero_documento"],
                 "dias": 0,
                 "presentes": 0,
-                "retrasos": 0,
+                "retardos": 0,
+                "ausentes": 0,
                 "sin_registro": 0,
             },
         )
         persona["dias"] += 1
         clave = {
             "Presente": "presentes",
-            "Retrasado": "retrasos",
+            "Retardo": "retardos",
+            "Ausente": "ausentes",
             "Sin registro": "sin_registro",
         }[fila["estado_asistencia"]]
         persona[clave] += 1
     for persona in resumen.values():
-        asistio = persona["presentes"] + persona["retrasos"]
+        asistio = persona["presentes"] + persona["retardos"]
         persona["asistencia"] = (
             round(asistio * 100 / persona["dias"]) if persona["dias"] else 0
         )
@@ -293,7 +358,13 @@ class CambioEstado(Entrada):
     id_usuarios: Annotated[int, Field(ge=1, le=ENTERO_MAXIMO)]
     id_ficha: Annotated[int, Field(ge=1, le=ENTERO_MAXIMO)]
     fecha: date
-    estado: Literal["Presente", "Retrasado", "Sin registro"]
+    estado: Literal["Presente", "Retardo", "Ausente", "Sin registro"]
+
+    @field_validator("estado", mode="before")
+    @classmethod
+    def nombre_anterior(cls, estado):
+        # Una pestaña abierta antes de la actualización todavía envía «Retrasado».
+        return "Retardo" if estado == "Retrasado" else estado
 
 
 @rutas.put("/asistencias/estado")

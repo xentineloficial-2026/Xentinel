@@ -5,12 +5,14 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Request, Response
 from pydantic import Field, StrictBool, StringConstraints, field_validator
 
-from . import push
+from . import push, semaforo
 from .http import Base, Entrada, ErrorAPI, Id, IdRuta, Paginacion, responder, texto
 from .seguridad import Administrador, InstructorOAdmin, SesionActual, es_admin
 
 rutas = APIRouter(prefix="/alertas", tags=["Alertas"])
 legado = APIRouter(include_in_schema=False)
+# Cada alerta lleva su color del semáforo. Las vistas de alarma omiten el verde (normal).
+COLUMNAS = f"*,{semaforo.sql()} AS semaforo"
 
 
 class Alerta(Entrada):
@@ -80,7 +82,8 @@ def listar(
     filtro = None if activa is None else activa == "true"
     return responder(
         db.filas(
-            """SELECT * FROM alertas_emergencia WHERE (%s::boolean IS NULL OR activa=%s)
+            f"""SELECT {COLUMNAS} FROM alertas_emergencia
+        WHERE (%s::boolean IS NULL OR activa=%s) AND {semaforo.SIN_VERDE}
         ORDER BY id_alerta DESC LIMIT %s OFFSET %s""",
             filtro,
             filtro,
@@ -95,7 +98,8 @@ def listar(
 def alertas_activas(db: Base, sesion: SesionActual):
     return responder(
         db.filas(
-            "SELECT * FROM alertas_emergencia WHERE activa ORDER BY id_alerta DESC"
+            f"""SELECT {COLUMNAS} FROM alertas_emergencia
+            WHERE activa AND {semaforo.SIN_VERDE} ORDER BY id_alerta DESC"""
         )
     )
 
@@ -103,7 +107,8 @@ def alertas_activas(db: Base, sesion: SesionActual):
 @legado.get("/alertas/estado-actual")
 def estado_actual(db: Base, sesion: SesionActual):
     alerta = db.fila(
-        "SELECT * FROM alertas_emergencia WHERE activa ORDER BY id_alerta DESC LIMIT 1"
+        f"""SELECT {COLUMNAS} FROM alertas_emergencia WHERE activa
+        AND {semaforo.SIN_VERDE} ORDER BY id_alerta DESC LIMIT 1"""
     )
     return responder(alerta or {"activa": False}, legado=True)
 
@@ -111,8 +116,8 @@ def estado_actual(db: Base, sesion: SesionActual):
 @rutas.post("", status_code=201)
 def crear(datos: Alerta, db: Base, sesion: Administrador):
     fila = db.fila(
-        """INSERT INTO alertas_emergencia(tipo_alerta,mensaje,severidad,fuente,referencia_externa,emisor_id)
-        VALUES(%s,%s,%s,%s,%s,%s) RETURNING *""",
+        f"""INSERT INTO alertas_emergencia(tipo_alerta,mensaje,severidad,fuente,referencia_externa,emisor_id)
+        VALUES(%s,%s,%s,%s,%s,%s) RETURNING {COLUMNAS}""",
         datos.tipo_alerta,
         datos.mensaje,
         datos.severidad,
@@ -204,7 +209,9 @@ def enviar_pase_lista(datos: Reporte, db: Base, sesion: InstructorOAdmin):
 
 @rutas.get("/{id}")
 def detalle(id: IdRuta, db: Base, sesion: SesionActual):
-    alerta = db.fila("SELECT * FROM alertas_emergencia WHERE id_alerta=%s", id)
+    alerta = db.fila(
+        f"SELECT {COLUMNAS} FROM alertas_emergencia WHERE id_alerta=%s", id
+    )
     if not alerta:
         raise alerta_ausente()
     return responder(alerta)
@@ -214,14 +221,15 @@ def detalle(id: IdRuta, db: Base, sesion: SesionActual):
 def cerrar(id: IdRuta, db: Base, sesion: Administrador):
     with db.transaccion() as conexion:
         alerta = conexion.fila(
-            "SELECT * FROM alertas_emergencia WHERE id_alerta=%s FOR UPDATE", id
+            f"SELECT {COLUMNAS} FROM alertas_emergencia WHERE id_alerta=%s FOR UPDATE",
+            id,
         )
         if not alerta:
             raise alerta_ausente()
         if alerta["activa"]:
             alerta = conexion.fila(
-                """UPDATE alertas_emergencia SET activa=false,fecha_fin=now(),cerrada_por=%s
-                WHERE id_alerta=%s RETURNING *""",
+                f"""UPDATE alertas_emergencia SET activa=false,fecha_fin=now(),cerrada_por=%s
+                WHERE id_alerta=%s RETURNING {COLUMNAS}""",
                 sesion.id,
                 id,
             )

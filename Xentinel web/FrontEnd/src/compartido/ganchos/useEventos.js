@@ -1,4 +1,5 @@
-/** Avisa cuando cambian los recursos indicados; sin canal activo, consulta cada 15 s como respaldo. */
+/** Avisa cuando cambian los recursos indicados (uno o una lista); sin canal activo, consulta
+ * cada 15 s como respaldo. */
 import { useEffect as useEfecto, useState as useEstado } from 'react';
 import { suscribirEventos } from '../servicios/eventos.js';
 
@@ -7,8 +8,11 @@ const RESPALDO_MS = 15000;
 
 export function useEventos(recurso, alCambiar) {
   const [estado, cambiarEstado] = useEstado('reconectando');
+  /* Texto estable: una lista nueva en cada render no reabre la suscripción. */
+  const recursos = [].concat(recurso || []).join(',');
   useEfecto(() => {
-    if (!recurso) return;
+    if (!recursos) return;
+    const vigilados = recursos.split(',');
     let agrupador = null;
     const avisar = () => {
       clearTimeout(agrupador);
@@ -24,7 +28,7 @@ export function useEventos(recurso, alCambiar) {
     const cancelar = suscribirEventos({
       alEstado,
       alCambio: (evento) => {
-        if (evento.recurso === recurso) avisar();
+        if (vigilados.includes(evento.recurso)) avisar();
       },
     });
     respaldo = setInterval(alCambiar, RESPALDO_MS);
@@ -33,6 +37,6 @@ export function useEventos(recurso, alCambiar) {
       clearTimeout(agrupador);
       clearInterval(respaldo);
     };
-  }, [recurso, alCambiar]);
+  }, [recursos, alCambiar]);
   return estado;
 }

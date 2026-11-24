@@ -9,6 +9,7 @@ export function CampoContrasena({
   autocompletado = 'new-password',
   error,
   ayuda,
+  enfocar = false,
 }) {
   const [visible, cambiarVisible] = useEstado(false); // Visibilidad local; la contraseña nunca se guarda por este componente.
   return (
@@ -23,6 +24,7 @@ export function CampoContrasena({
           onChange={alCambiar}
           autoComplete={autocompletado}
           required
+          data-initial-focus={enfocar || undefined}
           aria-invalid={!!error}
           aria-describedby={
             error || ayuda ? `${identificador}-ayuda` : undefined

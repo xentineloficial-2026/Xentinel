@@ -25,8 +25,14 @@ function guardarSesion(sesion) {
   }
 }
 export { guardarSesion };
-function caducarSesion() {
+/** motivo reemplaza el aviso de sesión vencida tras un cambio que pide volver a ingresar,
+ * como la contraseña o el correo; se muestra como confirmación, no como error. */
+function caducarSesion(motivo) {
   guardarSesion(null);
-  window.dispatchEvent(new Event('xentinel:session-expired'));
+  window.dispatchEvent(
+    new CustomEvent('xentinel:session-expired', {
+      detail: motivo ? { mensaje: motivo, tono: 'exito' } : null,
+    })
+  );
 }
 export { caducarSesion };

@@ -18,10 +18,12 @@ import {
   reporteAsistenciaPeriodo,
 } from '../admin/reportes.js';
 
-const ESTADOS = ['Presente', 'Retrasado', 'Sin registro'];
+/* Sin registro: día sin escaneo que nadie calificó todavía. Ausente: el instructor lo confirmó. */
+const ESTADOS = ['Presente', 'Retardo', 'Ausente', 'Sin registro'];
 const CLASE_ESTADO = {
   Presente: 'es-exito',
-  Retrasado: 'es-aviso',
+  Retardo: 'es-aviso',
+  Ausente: 'es-peligro',
   'Sin registro': 'es-neutro',
 };
 const formatoDia = new Intl.DateTimeFormat('es-CO', {
@@ -250,7 +252,8 @@ export function ListaAsistencia() {
     },
     { clave: 'dias', etiqueta: 'Días de clase' },
     { clave: 'presentes', etiqueta: 'Presente' },
-    { clave: 'retrasos', etiqueta: 'Retrasado' },
+    { clave: 'retardos', etiqueta: 'Retardo' },
+    { clave: 'ausentes', etiqueta: 'Ausente' },
     { clave: 'sin_registro', etiqueta: 'Sin registro' },
     {
       clave: 'asistencia',
@@ -313,8 +316,8 @@ export function ListaAsistencia() {
         <div>
           <h1>Asistencia</h1>
           <p>
-            A tiempo hasta la hora de inicio de la jornada; después, retrasado.
-            Puedes corregir el estado de cada aprendiz.
+            A tiempo hasta la hora de inicio de la jornada; después, retardo.
+            Puedes corregir el estado de cada aprendiz o marcarlo ausente.
           </p>
         </div>
         <div className="xn-admin-acciones">
@@ -471,7 +474,10 @@ export function ListaAsistencia() {
               Presentes: {cuenta('Presente')}
             </span>
             <span className="xn-estado es-aviso">
-              Retrasados: {cuenta('Retrasado')}
+              Retardos: {cuenta('Retardo')}
+            </span>
+            <span className="xn-estado es-peligro">
+              Ausentes: {cuenta('Ausente')}
             </span>
             <span className="xn-estado es-neutro">
               Sin registro: {cuenta('Sin registro')}
@@ -502,7 +508,8 @@ export function ListaAsistencia() {
                   {[
                     ['Días de clase', personaElegida.dias],
                     ['Presente', personaElegida.presentes],
-                    ['Retrasado', personaElegida.retrasos],
+                    ['Retardo', personaElegida.retardos],
+                    ['Ausente', personaElegida.ausentes],
                     ['Sin registro', personaElegida.sin_registro],
                     ['Asistencia', `${personaElegida.asistencia} %`],
                     ['Puntualidad', `${personaElegida.puntualidad} %`],

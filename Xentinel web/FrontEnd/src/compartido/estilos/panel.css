@@ -1715,7 +1715,7 @@
 }
 .xn-frecuencia dl {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
   gap: 10px;
   margin: 12px 0 0;
 }
@@ -1742,4 +1742,346 @@
 }
 .xn-perfil-distribucion .xn-formulario-cuadricula .xn-campo {
   margin: 0;
+}
+
+/* Diálogo estrecho para formularios de pocos campos. */
+.xn-dialogo--estrecho {
+  width: min(480px, calc(100% - 32px));
+}
+.xn-formulario-dialogo {
+  display: grid;
+  gap: 14px;
+}
+.xn-formulario-dialogo .xn-campo {
+  margin: 0;
+}
+.xn-formulario-dialogo .xn-dialogo-acciones {
+  margin-top: 8px;
+}
+.xn-codigo-entrada {
+  font-family: var(--xn-mono);
+  font-size: 24px !important;
+  letter-spacing: 0.4em;
+  text-align: center;
+}
+
+/* Requisitos de la contraseña nueva: se marcan mientras se escribe. */
+.xn-requisitos {
+  display: grid;
+  gap: 4px;
+  margin: -4px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  color: var(--xn-tenue);
+}
+.xn-requisitos li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.xn-requisitos li > span:first-child {
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.xn-requisitos li.es-cumplido {
+  color: var(--xn-exito);
+}
+.xn-requisitos li.es-cumplido > span:first-child {
+  background: currentColor;
+}
+
+/* Acceso a la cuenta: cada credencial en una fila con su acción. */
+.xn-seguridad {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.xn-seguridad li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 14px;
+  padding: 16px 0;
+  border-top: 1px solid var(--xn-borde);
+}
+.xn-seguridad li:first-child {
+  border-top: 0;
+  padding-top: 8px;
+}
+.xn-seguridad li > svg {
+  color: var(--xn-tenue);
+}
+.xn-seguridad strong {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+}
+.xn-seguridad span {
+  display: block;
+  font-size: 14px;
+  color: var(--xn-tenue);
+  overflow-wrap: anywhere;
+}
+@media (max-width: 560px) {
+  .xn-seguridad li {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .xn-seguridad li > button {
+    grid-column: 2;
+    justify-self: start;
+    margin-top: 6px;
+  }
+}
+
+/* Semáforo de alarmas: una caja oscura con dos luces, como en la calle. Rojo arriba, amarillo
+   abajo; cada luz se enciende solo si hay alarmas de su color. */
+.xn-semaforo {
+  --luz: 30px;
+  --fila: 48px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 18px;
+  padding: 18px 20px;
+  margin-bottom: 18px;
+  background: var(--xn-superficie);
+  border: 1px solid var(--xn-borde);
+  border-radius: var(--xn-radio-l);
+}
+.xn-semaforo-caja {
+  display: grid;
+  grid-template-rows: repeat(2, var(--fila));
+  place-items: center;
+  width: calc(var(--luz) + 18px);
+  border-radius: calc(var(--luz) / 2 + 9px);
+  background: #06141b;
+  box-shadow: inset 0 0 0 1px #ccd0cf26;
+}
+.xn-semaforo-luz {
+  width: var(--luz);
+  height: var(--luz);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-luz) 22%, #06141b);
+}
+.xn-semaforo-luz.es-rojo {
+  --color-luz: var(--xn-emergencia);
+}
+.xn-semaforo-luz.es-amarillo {
+  --color-luz: var(--xn-alarma);
+}
+.xn-semaforo-luz.esta-encendida {
+  background: var(--color-luz);
+  box-shadow:
+    0 0 18px 2px color-mix(in srgb, var(--color-luz) 70%, transparent),
+    inset 0 -4px 8px #0000002e;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .xn-semaforo-luz.es-rojo.esta-encendida {
+    animation: xn-luz-roja 2.4s ease-in-out infinite;
+  }
+}
+@keyframes xn-luz-roja {
+  50% {
+    box-shadow:
+      0 0 26px 6px color-mix(in srgb, var(--color-luz) 55%, transparent),
+      inset 0 -4px 8px #0000002e;
+  }
+}
+.xn-semaforo-filtros {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: repeat(2, var(--fila));
+  align-items: center;
+  column-gap: 16px;
+}
+.xn-semaforo-fila {
+  grid-column: 1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 100%;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: var(--xn-radio-m);
+  background: transparent;
+  color: var(--xn-texto);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.xn-semaforo-fila:hover {
+  background: var(--xn-superficie-alterna);
+}
+.xn-semaforo-fila[aria-pressed='true'] {
+  background: var(--xn-superficie-alterna);
+  border-color: var(--xn-contorno);
+}
+.xn-semaforo-fila strong {
+  min-width: 2ch;
+  font-size: 28px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+.xn-semaforo-fila span {
+  display: grid;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.xn-semaforo-fila small {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--xn-tenue);
+}
+.xn-semaforo-filtros > .xn-enlace-boton {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+}
+@media (max-width: 560px) {
+  .xn-semaforo {
+    --luz: 24px;
+    --fila: 44px;
+    padding: 14px;
+    gap: 12px;
+  }
+  .xn-semaforo-filtros {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .xn-semaforo-filtros > .xn-enlace-boton {
+    display: none;
+  }
+}
+
+/* Alarma: la barra lateral lleva el color del semáforo; el texto sigue sobrio. */
+.xn-alarmas {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.xn-alarma {
+  --color-alarma: var(--xn-emergencia);
+  padding: 18px 20px;
+  background: var(--xn-superficie);
+  border: 1px solid var(--xn-borde);
+  border-left: 6px solid var(--color-alarma);
+  border-radius: var(--xn-radio-m);
+}
+.xn-alarma.es-amarillo {
+  --color-alarma: var(--xn-alarma);
+}
+.xn-alarma-cabecera {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+.xn-alarma-cabecera > svg {
+  color: var(--color-alarma);
+  flex-shrink: 0;
+}
+.xn-alarma-cabecera h2 {
+  flex: 1;
+  min-width: 160px;
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+.xn-alarma-nivel {
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--color-alarma);
+  color: var(--xn-emergencia-texto);
+}
+.xn-alarma.es-amarillo .xn-alarma-nivel {
+  color: var(--xn-alarma-texto);
+}
+.xn-alarma-cabecera time {
+  font-family: var(--xn-mono);
+  font-size: 13px;
+  color: var(--xn-tenue);
+}
+.xn-trabajo-contenido .xn-alarma > p {
+  max-width: 72ch;
+  margin: 10px 0 0;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--xn-texto);
+}
+.xn-trabajo-contenido .xn-alarma > p.xn-alarma-fuente {
+  font-size: 13px;
+  color: var(--xn-tenue);
+}
+.xn-alarma-datos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 28px;
+  margin: 12px 0 0;
+}
+.xn-alarma-datos dt {
+  font-size: 12px;
+  color: var(--xn-tenue);
+}
+.xn-alarma-datos dd {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+}
+.xn-alarma .xn-alert-acciones {
+  margin-top: 14px;
+}
+.xn-alarmas-vacio h2 {
+  margin: 0 0 6px;
+}
+.xn-alarmas-historial summary {
+  font-weight: 600;
+  cursor: pointer;
+}
+.xn-alarmas-historial ul {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.xn-alarmas-historial li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 12px 0;
+  border-top: 1px solid var(--xn-borde);
+}
+.xn-alarmas-historial li > div {
+  flex: 1;
+  min-width: 180px;
+}
+.xn-alarmas-historial small {
+  display: block;
+  color: var(--xn-tenue);
+}
+.xn-alarma-punto {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--xn-emergencia);
+  flex-shrink: 0;
+}
+.xn-alarma-punto.es-amarillo {
+  background: var(--xn-alarma);
+}
+.xn-alert-franja--escaneo {
+  background: var(--xn-azul-suave);
+  color: var(--xn-texto);
+}
+.xn-franja-luz.es-rojo {
+  color: var(--xn-emergencia);
+}
+.xn-franja-luz.es-amarillo {
+  color: var(--xn-alarma);
 }

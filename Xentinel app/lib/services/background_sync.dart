@@ -5,45 +5,31 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/api_config.dart';
 import '../core/session.dart';
-import '../repositories/access_repository.dart';
 import '../repositories/auth_repository.dart';
-import 'access_outbox.dart';
 import 'credential_store.dart';
-import 'network_status.dart';
 
 /// Trabajo de mantenimiento mientras la app está abierta:
 ///
 /// - Renueva el JWT al 75 % de su vigencia (el celador no pierde la sesión ni el
 ///   canal en tiempo real cada 15 minutos).
-/// - Mantiene al día la credencial del carnet QR para usarlo sin conexión.
-/// - Envía la cola de accesos sin conexión al recuperar la red, al volver la app
-///   al frente y cada 30 s mientras queden pendientes.
+/// - Descarga la clave del carnet QR firmado del titular de la sesión. La clave vive
+///   solo en memoria: el carnet existe mientras hay sesión y lo valida el servidor.
 ///
 /// Todo es "mejor esfuerzo": un fallo de red se reintenta y nunca interrumpe la UI.
 class BackgroundSync with WidgetsBindingObserver {
   BackgroundSync({
     required this.session,
     required this.auth,
-    required this.access,
-    required this.outbox,
     required this.credentials,
-    this.network,
-    this.flushInterval = const Duration(seconds: 30),
   });
 
   final SessionStore session;
   final AuthRepository auth;
-  final AccessRepository access;
-  final AccessOutbox outbox;
   final CredentialStore credentials;
-  final NetworkStatus? network;
-  final Duration flushInterval;
 
   Timer? _renewTimer;
-  Timer? _flushTimer;
   String? _scheduledToken;
   String? _credentialFor;
-  StreamSubscription<void>? _restored;
   bool _started = false;
   bool _closed = false;
 
@@ -52,10 +38,7 @@ class BackgroundSync with WidgetsBindingObserver {
     _started = true;
     WidgetsBinding.instance.addObserver(this);
     session.addListener(_onSession);
-    outbox.addListener(_scheduleFlush);
-    _restored = network?.restored.listen((_) => flush());
     _onSession();
-    _scheduleFlush();
   }
 
   @override
@@ -68,17 +51,10 @@ class BackgroundSync with WidgetsBindingObserver {
         expiresAt.difference(DateTime.now()) < const Duration(minutes: 3)) {
       _renew(session.token!);
     }
-    // Mantiene vigente el carnet sin conexión (se oculta tras 30 días sin renovar).
     final user = session.user;
-    final credential = credentials.current;
-    if (user != null &&
-        (credential == null ||
-            '${credential.userId}' != user.id ||
-            DateTime.now().difference(credential.issuedAt) >
-                const Duration(days: 1))) {
+    if (user != null && '${credentials.current?.userId}' != user.id) {
       refreshCredential();
     }
-    flush();
   }
 
   void _onSession() {
@@ -88,7 +64,6 @@ class BackgroundSync with WidgetsBindingObserver {
       _renewTimer?.cancel();
       _scheduledToken = null;
       _credentialFor = null;
-      _scheduleFlush();
       return;
     }
     if (token != _scheduledToken) {
@@ -99,9 +74,7 @@ class BackgroundSync with WidgetsBindingObserver {
     if (user != null && _credentialFor != user.id) {
       _credentialFor = user.id;
       refreshCredential();
-      flush();
     }
-    _scheduleFlush();
   }
 
   void _scheduleRenewal(String token) {
@@ -167,33 +140,11 @@ class BackgroundSync with WidgetsBindingObserver {
     }
   }
 
-  void _scheduleFlush() {
-    if (_closed) return;
-    final operator = session.user?.id;
-    final hasPending =
-        operator != null && outbox.pendingFor(operator).isNotEmpty;
-    if (!hasPending) {
-      _flushTimer?.cancel();
-      _flushTimer = null;
-      return;
-    }
-    _flushTimer ??= Timer.periodic(flushInterval, (_) => flush());
-  }
-
-  /// Envía la cola ahora si hay sesión y red.
-  Future<int> flush() async {
-    if (_closed || session.token == null || network?.online == false) return 0;
-    return access.syncPending();
-  }
-
   void dispose() {
     _closed = true;
     if (_started) WidgetsBinding.instance.removeObserver(this);
     session.removeListener(_onSession);
-    outbox.removeListener(_scheduleFlush);
-    _restored?.cancel();
     _renewTimer?.cancel();
-    _flushTimer?.cancel();
   }
 }
 
@@ -201,10 +152,7 @@ final backgroundSyncProvider = Provider<BackgroundSync>((ref) {
   final sync = BackgroundSync(
     session: ref.read(sessionProvider),
     auth: ref.read(authRepositoryProvider),
-    access: ref.read(accessRepositoryProvider),
-    outbox: ref.read(accessOutboxProvider),
     credentials: ref.read(credentialStoreProvider),
-    network: ref.read(networkStatusProvider),
   )..start();
   ref.onDispose(sync.dispose);
   return sync;

@@ -66,6 +66,27 @@ def exportar_sql(destino):
     print("SQL independiente generado")
 
 
+def probar_correo(destino):
+    """Envía un correo de prueba con la configuración actual y muestra la causa si falla."""
+    from .correo import FalloCorreo, enviar_prueba, transporte
+
+    config = cargar_configuracion()
+    medio = transporte(config)
+    if not medio:
+        raise SystemExit(
+            "Correo sin configurar: define GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET y "
+            "GMAIL_REFRESH_TOKEN (Gmail API) o SMTP_HOST, SMTP_USER y SMTP_PASS (SMTP)."
+        )
+    print(f"Enviando por {medio}…")
+    try:
+        enviar_prueba(destino, config)
+    except FalloCorreo as fallo:
+        raise SystemExit(f"No se envió ({fallo.codigo}): {fallo.detalle}") from None
+    print(
+        "Correo de prueba enviado. Revisa la bandeja de entrada y la carpeta de spam."
+    )
+
+
 def ejecutar():
     analizador = argparse.ArgumentParser(description=__doc__)
     comandos = analizador.add_subparsers(dest="comando", required=True)
@@ -73,6 +94,8 @@ def ejecutar():
     servidor.add_argument("--recargar", action="store_true")
     comandos.add_parser("migrar")
     comandos.add_parser("crear-admin")
+    prueba = comandos.add_parser("probar-correo")
+    prueba.add_argument("destino", help="Correo que recibirá el mensaje de prueba")
     exportacion = comandos.add_parser("exportar-sql")
     exportacion.add_argument(
         "destino", nargs="?", default=RAIZ / "sql" / "Xentinel_completo.sql"
@@ -80,6 +103,9 @@ def ejecutar():
     opciones = analizador.parse_args()
     if opciones.comando == "exportar-sql":
         exportar_sql(opciones.destino)
+        return
+    if opciones.comando == "probar-correo":
+        probar_correo(opciones.destino)
         return
     if opciones.comando == "servir":
         config = cargar_configuracion()

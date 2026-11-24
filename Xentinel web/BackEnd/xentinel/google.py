@@ -47,10 +47,21 @@ class TokenTemporal:
             if self.valor and self.huella == huella and time.time() < self.vence - 60:
                 return self.valor
             respuesta = pedir()
-            self.valor = respuesta["access_token"]
+            valor = (
+                respuesta.get("access_token") if isinstance(respuesta, dict) else None
+            )
+            if not valor:
+                raise ValueError("Google respondió sin access_token")
+            self.valor = valor
             self.vence = time.time() + int(respuesta.get("expires_in", 3600))
             self.huella = huella
             return self.valor
+
+    def invalidar(self):
+        """Descarta el token guardado: Google lo rechazó aunque aún no vencía."""
+        with self.candado:
+            self.valor = None
+            self.vence = 0.0
 
 
 TOKEN_GMAIL = TokenTemporal()
