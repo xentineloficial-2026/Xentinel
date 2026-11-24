@@ -28,7 +28,9 @@ function InicioSesion() {
   /* ocupado: referencia estable entre renderizados, sin disparar una actualización visual. */
   const ocupado = useReferencia(false);
   /* iniciarSesion, mensajeSesion: valor de trabajo utilizado en esta operación. */
-  const { iniciarSesion, mensajeSesion } = useContexto(ContextoAutenticacion);
+  const { iniciarSesion, mensajeSesion, tonoSesion } = useContexto(
+    ContextoAutenticacion
+  );
   /* navegar: valor de trabajo utilizado en esta operación. */
   const navegar = useNavegacion();
   /* ubicacionRuta: valor de trabajo utilizado en esta operación. */
@@ -90,7 +92,12 @@ function InicioSesion() {
         <h2>Iniciar sesión</h2>
         <p>Usa los datos de tu cuenta institucional.</p>
         {mensajeSesion && (
-          <div className="xn-acceso-error" role="status">
+          <div
+            className={
+              tonoSesion === 'exito' ? 'xn-acceso-exito' : 'xn-acceso-error'
+            }
+            role="status"
+          >
             {mensajeSesion}
           </div>
         )}

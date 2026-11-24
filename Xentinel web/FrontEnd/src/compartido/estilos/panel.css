@@ -1743,3 +1743,96 @@
 .xn-perfil-distribucion .xn-formulario-cuadricula .xn-campo {
   margin: 0;
 }
+
+/* Diálogo estrecho para formularios de pocos campos. */
+.xn-dialogo--estrecho {
+  width: min(480px, calc(100% - 32px));
+}
+.xn-formulario-dialogo {
+  display: grid;
+  gap: 14px;
+}
+.xn-formulario-dialogo .xn-campo {
+  margin: 0;
+}
+.xn-formulario-dialogo .xn-dialogo-acciones {
+  margin-top: 8px;
+}
+.xn-codigo-entrada {
+  font-family: var(--xn-mono);
+  font-size: 24px !important;
+  letter-spacing: 0.4em;
+  text-align: center;
+}
+
+/* Requisitos de la contraseña nueva: se marcan mientras se escribe. */
+.xn-requisitos {
+  display: grid;
+  gap: 4px;
+  margin: -4px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  color: var(--xn-tenue);
+}
+.xn-requisitos li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.xn-requisitos li > span:first-child {
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.xn-requisitos li.es-cumplido {
+  color: var(--xn-exito);
+}
+.xn-requisitos li.es-cumplido > span:first-child {
+  background: currentColor;
+}
+
+/* Acceso a la cuenta: cada credencial en una fila con su acción. */
+.xn-seguridad {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.xn-seguridad li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 14px;
+  padding: 16px 0;
+  border-top: 1px solid var(--xn-borde);
+}
+.xn-seguridad li:first-child {
+  border-top: 0;
+  padding-top: 8px;
+}
+.xn-seguridad li > svg {
+  color: var(--xn-tenue);
+}
+.xn-seguridad strong {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+}
+.xn-seguridad span {
+  display: block;
+  font-size: 14px;
+  color: var(--xn-tenue);
+  overflow-wrap: anywhere;
+}
+@media (max-width: 560px) {
+  .xn-seguridad li {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .xn-seguridad li > button {
+    grid-column: 2;
+    justify-self: start;
+    margin-top: 6px;
+  }
+}
