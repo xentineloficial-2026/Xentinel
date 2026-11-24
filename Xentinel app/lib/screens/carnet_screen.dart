@@ -9,7 +9,6 @@ import '../components/xentinel_brand.dart';
 import '../core/theme.dart';
 import '../models/xentinel_models.dart';
 import '../providers/carnet_provider.dart';
-import '../services/credential_store.dart';
 import '../services/network_status.dart';
 import '../services/screen_brightness_service.dart';
 
@@ -37,11 +36,10 @@ QrCode buildCarnetQr(String data) {
   return QrCode.fromData(data: data, errorCorrectLevel: level);
 }
 
+/// Carnet del titular de la sesión. Xentinel valida en línea: sin red no se muestra
+/// el QR, porque el punto de control tampoco podría confirmarlo.
 class CarnetScreen extends ConsumerStatefulWidget {
-  const CarnetScreen({super.key, this.offline = false});
-
-  /// Carnet desde la credencial guardada, sin sesión ni conexión.
-  final bool offline;
+  const CarnetScreen({super.key});
 
   @override
   ConsumerState<CarnetScreen> createState() => _CarnetScreenState();
@@ -90,44 +88,42 @@ class _CarnetScreenState extends ConsumerState<CarnetScreen>
 
   @override
   Widget build(BuildContext context) {
-    final CarnetState carnet;
-    final String name;
-    final String role;
-    final String document;
-    final AccessStatus status;
-    if (widget.offline) {
-      carnet = ref.watch(offlineCarnetProvider);
-      final credential = ref.watch(
-        credentialStoreProvider.select((store) => store.current),
-      );
-      if (credential == null || !carnet.hasQr) {
-        return Scaffold(
-          appBar: AppBar(title: const Text('Carnet digital')),
-          body: const Center(
-            child: Padding(
-              padding: EdgeInsets.all(28),
-              child: Text(
-                'No hay un carnet guardado en este teléfono. Inicia sesión con conexión una vez para usarlo sin internet.',
-                textAlign: TextAlign.center,
-              ),
+    final user = ref.watch(currentUserProvider);
+    final carnet = ref.watch(carnetProvider);
+    final online = ref.watch(networkStatusProvider.select((n) => n.online));
+    if (user == null || !carnet.hasQr) return const Scaffold();
+    if (!online) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Carnet digital')),
+        body: const Center(
+          child: Padding(
+            padding: EdgeInsets.all(28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.wifi_off, size: 48, color: XentinelTheme.warning),
+                SizedBox(height: 16),
+                Text(
+                  'Sin conexión',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  'Tu carnet se valida en línea. Conéctate a internet (Wi‑Fi o '
+                  'datos móviles) y aparecerá aquí de inmediato.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: XentinelTheme.steel, height: 1.4),
+                ),
+              ],
             ),
           ),
-        );
-      }
-      name = credential.name;
-      role = credential.role.label;
-      document = credential.documentId;
-      status = credential.status;
-    } else {
-      final user = ref.watch(currentUserProvider);
-      carnet = ref.watch(carnetProvider);
-      if (user == null || !carnet.hasQr) return const Scaffold();
-      name = user.name;
-      role = user.role.label;
-      document = user.documentId;
-      status = user.status;
+        ),
+      );
     }
-    final online = ref.watch(networkStatusProvider.select((n) => n.online));
+    final name = user.name;
+    final role = user.role.label;
+    final document = user.documentId;
+    final status = user.status;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Carnet digital')),
@@ -243,10 +239,8 @@ class _CarnetScreenState extends ConsumerState<CarnetScreen>
                           ? Icons.verified_user_outlined
                           : Icons.info_outline,
                       text: carnet.signed
-                          ? online
-                                ? 'Carnet firmado. También funciona sin internet.'
-                                : 'Sin conexión: tu carnet firmado sigue funcionando.'
-                          : 'Carnet sin firma: actualiza el servidor para usarlo sin conexión.',
+                          ? 'Carnet firmado: el punto de control lo confirma en línea.'
+                          : 'Carnet sin firma: el servidor aún no emite carnets firmados.',
                     ),
                     const SizedBox(height: 8),
                     const _Hint(

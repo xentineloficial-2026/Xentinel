@@ -127,15 +127,22 @@ class ScannedPerson {
   }
 }
 
-/// PERMITIDO (verde).
+/// PERMITIDO. La entrada y la salida se distinguen a simple vista y al oído:
+/// verde con «¡Bienvenido!» al entrar, azul institucional con «¡Hasta pronto!» al salir.
 final class Granted extends AccessScanResult {
-  const Granted({super.user, this.person});
+  const Granted({super.user, this.person, this.isExit = false});
   final ScannedPerson? person;
 
+  /// Movimiento de SALIDA registrado (ENTRADA si es `false`).
+  final bool isExit;
+
+  static const entryMessage = 'Acceso Permitido. ¡Bienvenido!';
+  static const exitMessage = 'Salida Registrada. ¡Hasta pronto!';
+
   @override
-  Color get color => const Color(0xFF1B7F53);
+  Color get color => isExit ? const Color(0xFF18458D) : const Color(0xFF1B7F53);
   @override
-  String get message => 'Acceso Permitido';
+  String get message => isExit ? exitMessage : entryMessage;
   @override
   AccessStatus get status => AccessStatus.permitido;
 }
@@ -205,26 +212,6 @@ final class Unconfirmed extends AccessScanResult {
   Color get color => const Color(0xFFE8A33D);
   @override
   String get message => 'No se pudo confirmar el acceso';
-  @override
-  AccessStatus get status => AccessStatus.pendiente;
-}
-
-/// Sin conexión con el servidor: el movimiento quedó guardado en el teléfono y se
-/// enviará automáticamente al recuperar la red (azul institucional, no verde: el
-/// servidor todavía no lo confirmó).
-final class QueuedOffline extends AccessScanResult {
-  const QueuedOffline({required this.userId, this.repeated = false});
-
-  /// Identificador del carnet leído.
-  final int userId;
-
-  /// El mismo paso ya estaba en la cola: no se guardó dos veces.
-  final bool repeated;
-
-  @override
-  Color get color => const Color(0xFF18458D);
-  @override
-  String get message => 'Registrado sin conexión';
   @override
   AccessStatus get status => AccessStatus.pendiente;
 }

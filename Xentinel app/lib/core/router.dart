@@ -43,6 +43,31 @@ CustomTransitionPage<void> _page(GoRouterState state, Widget child) =>
       },
     );
 
+/// Bienvenida al ingresar: el inicio se acerca y aparece mientras el login se va.
+/// Dentro del inicio, los bloques entran escalonados (`Entrance`).
+CustomTransitionPage<void> _welcomePage(GoRouterState state, Widget child) =>
+    CustomTransitionPage<void>(
+      key: state.pageKey,
+      child: child,
+      transitionDuration: const Duration(milliseconds: 460),
+      reverseTransitionDuration: const Duration(milliseconds: 200),
+      transitionsBuilder: (context, animation, secondary, child) {
+        if (MediaQuery.disableAnimationsOf(context)) return child;
+        final curve = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
+        );
+        return FadeTransition(
+          opacity: curve,
+          child: ScaleTransition(
+            scale: Tween(begin: 0.94, end: 1.0).animate(curve),
+            child: child,
+          ),
+        );
+      },
+    );
+
 final routerProvider = Provider<GoRouter>((ref) {
   final refresh = ValueNotifier<int>(0);
   ref.listen<UserEntity?>(currentUserProvider, (_, __) => refresh.value++);
@@ -81,9 +106,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       final user = ref.read(currentUserProvider);
       final location = state.matchedLocation;
 
-      // El carnet sin conexión (tras biometría) y la alerta sísmica se abren con o
-      // sin sesión: la alerta llega aun con el teléfono bloqueado.
-      if (location == '/carnet-offline' || location == '/sismo') return null;
+      // La alerta sísmica se abre con o sin sesión: llega aun con el teléfono bloqueado.
+      if (location == '/sismo') return null;
       final publicRoute =
           location == '/login' || location == '/forgot-password';
       if (user == null) return publicRoute ? null : '/login';
@@ -98,16 +122,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/home',
-        pageBuilder: (_, state) => _page(state, const HomeScreen()),
+        pageBuilder: (_, state) => _welcomePage(state, const HomeScreen()),
       ),
       GoRoute(
         path: '/carnet',
         pageBuilder: (_, state) => _page(state, const CarnetScreen()),
-      ),
-      GoRoute(
-        path: '/carnet-offline',
-        pageBuilder: (_, state) =>
-            _page(state, const CarnetScreen(offline: true)),
       ),
       GoRoute(
         path: '/scanner',

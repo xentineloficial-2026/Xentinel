@@ -9,10 +9,7 @@ import '../components/xentinel_motion.dart';
 import '../core/errors.dart';
 import '../core/theme.dart';
 import '../models/xentinel_models.dart';
-import '../providers/carnet_provider.dart';
 import '../repositories/access_repository.dart';
-import '../services/access_outbox.dart';
-import '../services/background_sync.dart';
 import '../services/feedback_service.dart';
 import '../services/camera_session.dart';
 import '../services/network_status.dart';
@@ -157,9 +154,7 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
     }
 
     // Con datos en pantalla, el celador necesita un poco más de tiempo para leerlos.
-    final duration = result is Granted || result is QueuedOffline
-        ? _grantedDuration
-        : _resultDuration;
+    final duration = result is Granted ? _grantedDuration : _resultDuration;
     _resetTimer = Timer(duration, () {
       if (!mounted) return;
       setState(() {
@@ -170,13 +165,13 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
   }
 
   IconData _iconFor(AccessScanResult r) => switch (r) {
-    Granted() => Icons.check_circle_outline,
+    Granted(isExit: false) => Icons.login_rounded,
+    Granted(isExit: true) => Icons.logout_rounded,
     Alert() => Icons.warning_amber_rounded,
     NotRegistered() => Icons.person_search,
     Denied() => Icons.block,
     VisitorAccess() => Icons.person_outline,
     Unconfirmed() => Icons.cloud_off,
-    QueuedOffline() => Icons.cloud_upload_outlined,
   };
 
   Future<void> _setZoom(double value) async {
@@ -198,15 +193,6 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
         ),
       );
     }
-  }
-
-  void _showQueue() {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (_) => const _QueueSheet(),
-    );
   }
 
   Widget _cameraStatus() {
@@ -269,10 +255,6 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
   Widget build(BuildContext context) {
     final result = _result;
     final online = ref.watch(networkStatusProvider.select((n) => n.online));
-    final operator = ref.watch(currentUserProvider)?.id;
-    final outbox = ref.watch(accessOutboxProvider);
-    final pending = operator == null ? 0 : outbox.pendingFor(operator).length;
-    final issues = outbox.issues.length;
 
     return AnimatedBuilder(
       animation: _camera,
@@ -280,22 +262,6 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
         appBar: AppBar(
           title: const Text('Escáner de acceso'),
           actions: [
-            if (pending > 0 || issues > 0)
-              IconButton(
-                tooltip: 'Registros sin conexión',
-                onPressed: _showQueue,
-                icon: Badge(
-                  label: Text('${pending > 0 ? pending : issues}'),
-                  backgroundColor: pending > 0
-                      ? const Color(0xFF18458D)
-                      : XentinelTheme.alarm,
-                  child: Icon(
-                    pending > 0
-                        ? Icons.cloud_upload_outlined
-                        : Icons.report_outlined,
-                  ),
-                ),
-              ),
             ValueListenableBuilder<MobileScannerState>(
               valueListenable: _driver.controller,
               builder: (context, state, _) => IconButton(
@@ -360,9 +326,7 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
                 left: 16,
                 right: 16,
                 top: 12,
-                child: IgnorePointer(
-                  child: _ScannerHint(online: online, pending: pending),
-                ),
+                child: IgnorePointer(child: _ScannerHint(online: online)),
               ),
             // Zoom y selector entrada / salida
             if (_camera.canScan)
@@ -475,17 +439,14 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
 
 /// Indicaciones de lectura y estado de la conexión.
 class _ScannerHint extends StatelessWidget {
-  const _ScannerHint({required this.online, required this.pending});
+  const _ScannerHint({required this.online});
   final bool online;
-  final int pending;
 
   @override
   Widget build(BuildContext context) {
     final text = online
-        ? pending > 0
-              ? 'Enviando $pending registro(s) guardado(s) sin conexión…'
-              : 'Carnet a 20–30 cm · Toca para enfocar · Pellizca para acercar'
-        : 'Sin conexión: los accesos se guardan y se envían solos al volver la red. Verifica el documento.';
+        ? 'Carnet a 20–30 cm. Toca para enfocar y pellizca para acercar.'
+        : 'Sin conexión: el escáner necesita internet para validar carnets.';
     return GlassPanel(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       child: Row(
@@ -503,89 +464,6 @@ class _ScannerHint extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// Registros guardados sin conexión e incidencias de la sincronización.
-class _QueueSheet extends ConsumerWidget {
-  const _QueueSheet();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final operator = ref.watch(currentUserProvider)?.id;
-    final outbox = ref.watch(accessOutboxProvider);
-    final pending = operator == null
-        ? const <PendingAccess>[]
-        : outbox.pendingFor(operator);
-    final issues = outbox.issues;
-    final online = ref.watch(networkStatusProvider.select((n) => n.online));
-    String time(DateTime at) =>
-        TimeOfDay.fromDateTime(at.toLocal()).format(context);
-
-    return SafeArea(
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.sizeOf(context).height * 0.75,
-        ),
-        child: ListView(
-          shrinkWrap: true,
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-          children: [
-            Text(
-              'Registros sin conexión',
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
-            const SizedBox(height: 6),
-            Text(
-              pending.isEmpty
-                  ? 'No hay registros pendientes de enviar.'
-                  : online
-                  ? '${pending.length} pendiente(s). Se envían automáticamente.'
-                  : '${pending.length} pendiente(s). Se enviarán al recuperar la conexión.',
-              style: const TextStyle(color: XentinelTheme.steel),
-            ),
-            for (final entry in pending)
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.schedule),
-                title: Text('ID ${entry.userId} · ${entry.type}'),
-                subtitle: Text('Escaneado a las ${time(entry.scannedAt)}'),
-              ),
-            if (pending.isNotEmpty && online) ...[
-              const SizedBox(height: 8),
-              FilledButton.icon(
-                onPressed: () => ref.read(backgroundSyncProvider).flush(),
-                icon: const Icon(Icons.cloud_upload_outlined),
-                label: const Text('Enviar ahora'),
-              ),
-            ],
-            if (issues.isNotEmpty) ...[
-              const SizedBox(height: 20),
-              const Text(
-                'Requieren revisión',
-                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
-              ),
-              for (final issue in issues)
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(
-                    Icons.report_outlined,
-                    color: XentinelTheme.alarm,
-                  ),
-                  title: Text(
-                    '${issue.name ?? 'ID ${issue.userId}'} · ${issue.type} · ${time(issue.scannedAt)}',
-                  ),
-                  subtitle: Text(issue.reason),
-                ),
-              TextButton(
-                onPressed: () => ref.read(accessOutboxProvider).clearIssues(),
-                child: const Text('Marcar como revisados'),
-              ),
-            ],
-          ],
-        ),
       ),
     );
   }
@@ -744,10 +622,6 @@ class _ResultOverlay extends StatelessWidget {
       Denied(:final reason) => reason,
       Alert(:final reason) => reason,
       Unconfirmed(:final reason) => reason,
-      QueuedOffline(:final userId, :final repeated) =>
-        '${repeated ? 'Ya estaba guardado' : 'Carnet ID $userId guardado'}. '
-            'Se enviará automáticamente al volver la conexión. '
-            'Verifica el documento de identidad antes de permitir el paso.',
       _ => null,
     };
 
