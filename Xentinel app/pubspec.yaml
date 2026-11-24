@@ -32,6 +32,23 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.4
+
+# Icono de la app con el logo oficial (la X de Xentinel). Para regenerarlo tras cambiar
+# las imágenes de assets/icon: dart run flutter_launcher_icons
+flutter_launcher_icons:
+  android: "ic_launcher"
+  ios: true
+  remove_alpha_ios: true
+  image_path: "assets/icon/xentinel-icono.png"
+  # Android 8+: fondo tinta y la X dentro de la zona segura del icono adaptable.
+  adaptive_icon_background: "#06141B"
+  adaptive_icon_foreground: "assets/icon/xentinel-primer-plano.png"
+  # La imagen ya deja la X dentro de la zona segura: sin margen adicional.
+  adaptive_icon_foreground_inset: 0
+  # Android 13+: iconos temáticos del sistema.
+  adaptive_icon_monochrome: "assets/icon/xentinel-primer-plano.png"
+  min_sdk_android: 21
 
 flutter:
   uses-material-design: true
