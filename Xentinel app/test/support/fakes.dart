@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:xentinel/services/access_outbox.dart';
 import 'package:xentinel/services/credential_store.dart';
 import 'package:xentinel/services/network_status.dart';
 import 'package:xentinel/services/screen_brightness_service.dart';
@@ -14,18 +13,6 @@ class MemorySecureStore implements SecureKeyValueStore {
   Future<void> write(String key, String value) async => values[key] = value;
   @override
   Future<void> delete(String key) async => values.remove(key);
-}
-
-class MemoryOutboxPersistence implements OutboxPersistence {
-  String? value;
-  int writes = 0;
-  @override
-  Future<String?> read() async => value;
-  @override
-  Future<void> write(String data) async {
-    writes++;
-    value = data;
-  }
 }
 
 /// Red controlable: permite simular pérdida y recuperación de la conexión.

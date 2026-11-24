@@ -13,6 +13,10 @@ import 'package:xentinel/repositories/alerts_repository.dart';
 import 'package:xentinel/repositories/auth_repository.dart';
 import 'package:xentinel/services/alert_events.dart';
 import 'package:xentinel/services/api_client.dart';
+import 'package:xentinel/models/scan_alarm.dart';
+import 'package:xentinel/services/network_status.dart';
+
+import 'support/fakes.dart';
 
 const user = UserEntity(
   id: '7',
@@ -122,13 +126,15 @@ void main() {
   );
 
   test(
-    'QR validation rejects malformed, future, expired, and out-of-range IDs before networking',
+    'QR validation rejects malformed, future, expired and out-of-range codes without registering, and reports each as an alarm',
     () async {
-      var calls = 0;
+      final reports = <Map>[];
+      final paths = <String>[];
       final now = DateTime.utc(2026, 10, 21);
       final repository = AccessRepository(
-        api((_) {
-          calls++;
+        api((request) {
+          paths.add(request.url.path);
+          reports.add(jsonDecode(request.body) as Map);
           return ok({});
         }),
         now: () => now,
@@ -148,9 +154,76 @@ void main() {
           isA<Denied>(),
         );
       }
-      expect(calls, 0);
+      // El reporte no bloquea la lectura: se envía en segundo plano.
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(paths, everyElement(endsWith('/alarmas/qr')));
+      expect(reports.map((report) => report['motivo']), [
+        'QR_INVALIDO',
+        'QR_INVALIDO',
+        'QR_INVALIDO',
+        'QR_VENCIDO',
+        'QR_VENCIDO',
+      ]);
+      expect(reports.first['contenido'], 'XENTINEL:-1:1');
+      expect(reports.first['tipo'], 'ENTRADA');
     },
   );
+
+  test(
+    'entry welcomes and exit says goodbye, each with its own color',
+    () async {
+      final now = DateTime.utc(2026, 10, 21);
+      final repository = AccessRepository(
+        api((request) {
+          final body = jsonDecode(request.body) as Map;
+          return ok({
+            'id_usuarios': 7,
+            'tipo': body['tipo'],
+            'estado': 'Permitido',
+          });
+        }),
+        now: () => now,
+      );
+      final payload = 'XENTINEL:7:${now.millisecondsSinceEpoch}';
+      final entry = await repository.processScanPayload(
+        payload: payload,
+        isExitMode: false,
+      );
+      final exit = await repository.processScanPayload(
+        payload: payload,
+        isExitMode: true,
+      );
+      expect(entry.message, 'Acceso Permitido. ¡Bienvenido!');
+      expect(exit.message, 'Salida Registrada. ¡Hasta pronto!');
+      expect((exit as Granted).isExit, isTrue);
+      expect(entry.color, isNot(exit.color));
+      expect(entry.status, exit.status);
+    },
+  );
+
+  test('without network the scan is not attempted and says so', () async {
+    var calls = 0;
+    final connectivity = FakeConnectivity(online: false);
+    final network = NetworkStatus(connectivity);
+    addTearDown(network.dispose);
+    await Future<void>.delayed(Duration.zero);
+    final now = DateTime.utc(2026, 10, 21);
+    final repository = AccessRepository(
+      api((_) {
+        calls++;
+        return ok({});
+      }),
+      now: () => now,
+      network: network,
+    );
+    final result = await repository.processScanPayload(
+      payload: 'XENTINEL:7:${now.millisecondsSinceEpoch}',
+      isExitMode: false,
+    );
+    expect(result, isA<Unconfirmed>());
+    expect((result as Unconfirmed).reason, contains('necesita internet'));
+    expect(calls, 0);
+  });
 
   test(
     'retry after lost response preserves idempotency key; new direction changes it',
@@ -172,9 +245,13 @@ void main() {
         now: () => now,
       );
       final payload = 'XENTINEL:7:${now.millisecondsSinceEpoch}';
-      await expectLater(
-        repository.processScanPayload(payload: payload, isExitMode: false),
-        throwsA(isA<ApiException>()),
+      // Sin respuesta no se sabe si quedó registrado: nunca se informa como denegado.
+      expect(
+        await repository.processScanPayload(
+          payload: payload,
+          isExitMode: false,
+        ),
+        isA<Unconfirmed>(),
       );
       expect(
         await repository.processScanPayload(
@@ -347,15 +424,20 @@ void main() {
   );
 
   test(
-    'alerts sort by severity and unknown severity is not downgraded',
+    'alerts sort by severity, green is never an alarm and unknown severity is not downgraded',
     () async {
       final repository = AlertsRepository(
         api(
-          (_) =>
-              ok([alertJson(id: 1, severity: 'informativa'), alertJson(id: 2)]),
+          (_) => ok([
+            alertJson(id: 1, severity: 'informativa'),
+            alertJson(id: 3, severity: 'moderada'),
+            alertJson(id: 2),
+          ]),
         ),
       );
-      expect((await repository.fetchActive()).map((a) => a.id), [2, 1]);
+      final alerts = await repository.fetchActive();
+      expect(alerts.map((a) => a.id), [2, 3]);
+      expect(alerts.map((a) => a.semaforo), [Semaforo.rojo, Semaforo.amarillo]);
       expect(
         EmergencyAlert.fromApi(alertJson(severity: 'unknown')).severity,
         AlertSeverity.alta,

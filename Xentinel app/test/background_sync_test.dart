@@ -5,13 +5,10 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:xentinel/core/session.dart';
 import 'package:xentinel/models/xentinel_models.dart';
-import 'package:xentinel/repositories/access_repository.dart';
 import 'package:xentinel/repositories/auth_repository.dart';
-import 'package:xentinel/services/access_outbox.dart';
 import 'package:xentinel/services/api_client.dart';
 import 'package:xentinel/services/background_sync.dart';
 import 'package:xentinel/services/credential_store.dart';
-import 'package:xentinel/services/network_status.dart';
 
 import 'support/fakes.dart';
 
@@ -50,22 +47,16 @@ void main() {
   late List<String> paths;
   late int renewals;
   late http.Response Function(http.Request) renewResponse;
+  late MemorySecureStore secure;
   late CredentialStore credentials;
-  late MemoryOutboxPersistence storage;
-  late AccessOutbox outbox;
-  late FakeConnectivity connectivity;
-  late NetworkStatus network;
   late ApiClient api;
   late BackgroundSync sync;
 
   // Todo se crea dentro de la zona de tiempo simulado de cada prueba.
   void build() {
     session = SessionStore();
-    credentials = CredentialStore(MemorySecureStore());
-    storage = MemoryOutboxPersistence();
-    outbox = AccessOutbox(storage);
-    connectivity = FakeConnectivity();
-    network = NetworkStatus(connectivity);
+    secure = MemorySecureStore();
+    credentials = CredentialStore(secure);
     api = ApiClient(
       session,
       baseUrl: 'https://api.example.test/api/v1',
@@ -90,36 +81,14 @@ void main() {
               }),
               200,
             );
-          case '/api/v1/ingresos':
-            final body = jsonDecode(request.body) as Map;
-            return http.Response(
-              jsonEncode({
-                'data': {
-                  'id_usuarios': body['id_usuarios'],
-                  'tipo': body['tipo'],
-                  'estado': 'Permitido',
-                },
-              }),
-              201,
-            );
         }
         return http.Response('{"data":{}}', 200);
       }),
     );
-    final access = AccessRepository(
-      api,
-      outbox: outbox,
-      session: session,
-      network: network,
-    );
     sync = BackgroundSync(
       session: session,
       auth: AuthRepository(api),
-      access: access,
-      outbox: outbox,
       credentials: credentials,
-      network: network,
-      flushInterval: const Duration(seconds: 30),
     )..start();
   }
 
@@ -142,7 +111,6 @@ void main() {
   tearDown(() {
     sync.dispose();
     api.close();
-    network.dispose();
     session.dispose();
   });
 
@@ -184,7 +152,7 @@ void main() {
     expect(session.message, contains('venció'));
   });
 
-  testWidgets('signed carnet key is fetched for offline use at sign in', (
+  testWidgets('signed carnet key is fetched at sign in and kept in memory', (
     tester,
   ) async {
     build();
@@ -195,34 +163,20 @@ void main() {
     expect(credential.userId, 9);
     expect(credential.name, 'Andrés García');
     expect(credential.codeAt(DateTime.now()), startsWith('XN2:9:'));
+    // Solo en línea: la clave nunca se escribe en el almacén del teléfono.
+    expect(secure.values, isEmpty);
     session.clear();
     await tester.pump(const Duration(seconds: 1));
   });
 
-  testWidgets('queued accesses are sent as soon as the network returns', (
+  testWidgets('the offline carnet saved by older versions is erased', (
     tester,
   ) async {
     build();
-    session.signIn(guard, 'jwt-1', 900);
-    await settle(tester);
-    connectivity.set(false);
-    await settle(tester);
-    await outbox.add(
-      PendingAccess(
-        requestId: '2f1e7c4a-1111-4111-8111-111111111111',
-        operatorId: '9',
-        userId: 51,
-        type: 'ENTRADA',
-        scannedAt: DateTime.now(),
-      ),
-    );
-    await tester.pump(const Duration(seconds: 31));
-    expect(paths.where((p) => p == 'ingresos'), isEmpty);
-    connectivity.set(true);
-    await settle(tester);
-    expect(paths.where((p) => p == 'ingresos'), hasLength(1));
-    expect(outbox.pending, isEmpty);
-    session.clear();
-    await tester.pump(const Duration(seconds: 1));
+    secure.values['xentinel_qr_credential_v1'] = '{"v":1,"id":9}';
+    await credentials.load();
+    expect(secure.values, isEmpty);
+    expect(credentials.current, isNull);
+    await tester.pump();
   });
 }
