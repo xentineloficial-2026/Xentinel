@@ -15,6 +15,7 @@ from . import (
     alertas,
     autenticacion,
     catalogos,
+    estado_correo,
     eventos,
     personas,
     programas,
@@ -88,6 +89,7 @@ def crear_aplicacion(configuracion=None):
         alertas.rutas,
         alarmas.rutas,
         riesgos.rutas,
+        estado_correo.rutas,
         eventos.rutas,
     ):
         app.include_router(rutas, prefix="/api/v1")
