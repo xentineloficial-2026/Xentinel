@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { useAutenticacion } from '../compartido/contextos/autenticacion.js';
 import { useRecurso } from '../compartido/ganchos/useRecurso.js';
+import { useEventos } from '../compartido/ganchos/useEventos.js';
 import { ConmutadorTema } from '../compartido/componentes/ConmutadorTema.jsx';
 import { Marca } from '../compartido/identidad/Marca.jsx';
 import { Resumen } from '../compartido/componentes/Resumen.jsx';
@@ -54,7 +55,7 @@ const etiquetas = {
   jornadas: 'Jornadas',
   horarios: 'Calendario',
   asistencias: 'Asistencia',
-  alertas: 'Alertas',
+  alertas: 'Alarmas',
   qr: 'Mi código QR',
   perfil: 'Mi perfil',
 };
@@ -159,6 +160,41 @@ function AlertasActivas({ base }) {
         ))}
       </div>
     </>
+  );
+}
+/** Celador y administración: aviso de carnets QR por revisar, en vivo, fuera del módulo de alarmas. */
+function AlarmasEscaneo({ base }) {
+  const recurso = useRecurso('/alarmas');
+  const refrescar = recurso.refrescar;
+  useEventos('alarmas_qr', refrescar);
+  useEfecto(() => {
+    window.addEventListener('xentinel:alerts-changed', refrescar);
+    return () => window.removeEventListener('xentinel:alerts-changed', refrescar);
+  }, [refrescar]);
+  const escaneos = (recurso.datos || []).filter((alarma) => alarma.origen === 'qr');
+  if (!escaneos.length) return null;
+  const rojas = escaneos.filter((alarma) => alarma.semaforo === 'rojo').length;
+  return (
+    /* Franja sobria: no es una evacuación. Solo el ícono lleva el color del semáforo. */
+    <div className="xn-alert-franja xn-alert-franja--escaneo" role="status">
+      <Codigo
+        size={20}
+        strokeWidth={2.4}
+        className={`xn-franja-luz es-${rojas ? 'rojo' : 'amarillo'}`}
+        aria-hidden="true"
+      />
+      <strong>
+        {escaneos.length === 1
+          ? '1 carnet QR por revisar'
+          : `${escaneos.length} carnets QR por revisar`}
+      </strong>
+      <span>
+        {rojas
+          ? `${rojas === 1 ? 'Uno no es verídico' : `${rojas} no son verídicos`}: verifica el documento de identidad.`
+          : 'Carnets vencidos: pide que los actualicen en la app.'}
+      </span>
+      <Enlace to={`${base}?modulo=alertas`}>Revisar alarmas</Enlace>
+    </div>
   );
 }
 /** rolEsperado procede de una entrada protegida; la navegación nunca sustituye la autorización del servidor. */
@@ -358,6 +394,9 @@ export function PanelTrabajo({ rolEsperado: rol }) {
           className="xn-trabajo-contenido"
         >
           <AlertasActivas base={`/${rol}`} />
+          {['admin', 'celador'].includes(rol) && modulo !== 'alertas' && (
+            <AlarmasEscaneo base={`/${rol}`} />
+          )}
           <div key={`${rol}:${modulo}`} className="xn-modulo-entra">
             {contenido}
           </div>

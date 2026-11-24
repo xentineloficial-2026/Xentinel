@@ -1,20 +1,45 @@
-/** Emergencias conectadas al API: publicación/cierre por administración, pase de lista y SOS voluntario. */
+/** Alarmas con semáforo (rojo y amarillo): riesgos críticos y carnets QR vencidos o falsos.
+ * Administración publica y cierra alertas; instructores envían pase de lista; todos piden SOS. */
 import { useRef as useReferencia, useState as useEstado } from 'react';
+import { QrCode as Codigo, TriangleAlert as Triangulo } from 'lucide-react';
 import { useAutenticacion } from '../contextos/autenticacion.js';
 import { rolParaUsuario } from '../../configuracion/navegacion.js';
 import { useRecurso } from '../ganchos/useRecurso.js';
+import { useEventos } from '../ganchos/useEventos.js';
 import { solicitar } from '../servicios/cliente.js';
 import { AlertasNavegador } from './AlertasNavegador.jsx';
 import { Dialogo } from './Dialogo.jsx';
 import { MensajeEstado, EstadoConsulta } from './MensajeEstado.jsx';
 import { TablaDatos, Paginacion } from './TablaDatos.jsx';
 import { formatearFecha, usePaginacion } from '../utilidades/tablas.js';
+/* Solo niveles de alarma: el verde (informativo) no se publica como alerta. */
+const NIVELES = [
+  ['moderada', 'Amarillo: advertencia'],
+  ['alta', 'Rojo: riesgo alto'],
+  ['critica', 'Rojo: crítico'],
+];
+const SEMAFORO = {
+  rojo: { nombre: 'Rojo', plural: 'Críticas', guia: 'Actúa ahora' },
+  amarillo: {
+    nombre: 'Amarillo',
+    plural: 'Advertencias',
+    guia: 'Revisa pronto',
+  },
+};
+const horaCorta = (fecha) =>
+  new Intl.DateTimeFormat('es-CO', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(fecha));
+
 function EditorAlerta({ alCerrar, alGuardar }) {
   /* formulario, cambiarFormulario: estado de la vista y función para actualizarlo. */
   const [formulario, cambiarFormulario] = useEstado({
     tipo_alerta: 'Simulacro',
     mensaje: '',
-    severidad: 'informativa',
+    severidad: 'moderada',
   });
   /* error, cambiarError: estado de la vista y función para actualizarlo. */
   const [error, cambiarError] = useEstado(null);
@@ -84,7 +109,7 @@ function EditorAlerta({ alCerrar, alGuardar }) {
             </select>
           </div>
           <div className="xn-campo">
-            <label htmlFor="alert-severity">Severidad</label>
+            <label htmlFor="alert-severity">Nivel del semáforo</label>
             <select
               id="alert-severity"
               value={formulario.severidad}
@@ -95,8 +120,10 @@ function EditorAlerta({ alCerrar, alGuardar }) {
                 })
               }
             >
-              {['informativa', 'moderada', 'alta', 'critica'].map((tipo) => (
-                <option key={tipo}>{tipo}</option>
+              {NIVELES.map(([valor, etiqueta]) => (
+                <option key={valor} value={valor}>
+                  {etiqueta}
+                </option>
               ))}
             </select>
           </div>
@@ -424,55 +451,151 @@ function RegistrosAlerta({ alerta, tipo, alCerrar }) {
     </Dialogo>
   );
 }
+/** El semáforo: dos luces que cuentan y filtran. Es el único elemento llamativo del panel. */
+function Semaforo({ conteo, filtro, alFiltrar }) {
+  return (
+    <section className="xn-semaforo" aria-label="Semáforo de alarmas">
+      <div className="xn-semaforo-caja" aria-hidden="true">
+        {['rojo', 'amarillo'].map((color) => (
+          <span
+            key={color}
+            className={`xn-semaforo-luz es-${color}${conteo[color] ? ' esta-encendida' : ''}`}
+          />
+        ))}
+      </div>
+      <div className="xn-semaforo-filtros" role="group" aria-label="Filtrar alarmas">
+        {['rojo', 'amarillo'].map((color) => (
+          <button
+            key={color}
+            type="button"
+            className={`xn-semaforo-fila es-${color}`}
+            aria-pressed={filtro === color}
+            onClick={() => alFiltrar(filtro === color ? null : color)}
+          >
+            <strong>{conteo[color] ?? 0}</strong>
+            <span>
+              {SEMAFORO[color].plural}
+              <small>{SEMAFORO[color].guia}</small>
+            </span>
+          </button>
+        ))}
+        <button
+          type="button"
+          className="xn-enlace-boton xn-texto-enlace"
+          aria-pressed={!filtro}
+          onClick={() => alFiltrar(null)}
+        >
+          Ver todas
+        </button>
+      </div>
+    </section>
+  );
+}
+
+/** Una alarma: barra del color del semáforo, origen, detalle y lo que se puede hacer. */
+function TarjetaAlarma({ alarma, children: acciones }) {
+  const Icono = alarma.origen === 'qr' ? Codigo : Triangulo;
+  return (
+    <article className={`xn-alarma es-${alarma.semaforo}`}>
+      <div className="xn-alarma-cabecera">
+        <Icono size={20} strokeWidth={2.2} aria-hidden="true" />
+        <h2>{alarma.titulo}</h2>
+        <span className="xn-alarma-nivel">
+          {SEMAFORO[alarma.semaforo].nombre}
+        </span>
+        <time dateTime={alarma.fecha}>{horaCorta(alarma.fecha)}</time>
+      </div>
+      <p>{alarma.detalle}</p>
+      {alarma.origen === 'qr' && (
+        <dl className="xn-alarma-datos">
+          <div>
+            <dt>Movimiento</dt>
+            <dd>{alarma.tipo_movimiento === 'SALIDA' ? 'Salida' : 'Entrada'}</dd>
+          </div>
+          {(alarma.titular || alarma.id_reclamado) && (
+            <div>
+              <dt>{alarma.titular ? 'Titular' : 'El código dice ser'}</dt>
+              <dd>{alarma.titular || `ID ${alarma.id_reclamado}`}</dd>
+            </div>
+          )}
+          {alarma.registrado_por && (
+            <div>
+              <dt>Escaneó</dt>
+              <dd>{alarma.registrado_por}</dd>
+            </div>
+          )}
+        </dl>
+      )}
+      {alarma.origen === 'riesgo' && alarma.fuente && (
+        <p className="xn-alarma-fuente">
+          {alarma.fuente === 'PRUEBA'
+            ? 'Simulacro de la API de gestión de riesgos'
+            : `Fuente: ${alarma.fuente}`}
+        </p>
+      )}
+      {acciones && <div className="xn-alert-acciones">{acciones}</div>}
+    </article>
+  );
+}
+
 function PanelAlertas() {
-  /* usuario: valor de trabajo utilizado en esta operación. */
   const { usuario } = useAutenticacion();
-  /* rol: valor de trabajo utilizado en esta operación. */
   const rol = rolParaUsuario(usuario);
-  /* esAdministrador: valor de trabajo utilizado en esta operación. */
   const esAdministrador = rol === 'admin';
-  /* paginacion: valor de trabajo utilizado en esta operación. */
+  const [filtro, cambiarFiltro] = useEstado(null);
+  const alarmas = useRecurso(`/alarmas${filtro ? `?semaforo=${filtro}` : ''}`);
   const paginacion = usePaginacion();
-  /* recurso: consulta cancelable al servidor, con datos, estado y reintento. */
-  const recurso = useRecurso(`/alertas?${paginacion.consulta}`);
-  /* accion, cambiarAccion: estado de la vista y función para actualizarlo. */
+  /* Historial: alertas cerradas y activas, para revisar reportes y SOS. */
+  const historial = useRecurso(`/alertas?${paginacion.consulta}`);
+  const canal = useEventos(
+    ['alertas_emergencia', 'alarmas_qr'],
+    alarmas.refrescar
+  );
   const [accion, cambiarAccion] = useEstado(null);
-  /* retroalimentacion, cambiarRetroalimentacion: estado de la vista y función para actualizarlo. */
   const [retroalimentacion, cambiarRetroalimentacion] = useEstado({});
-  /* guardando, cambiarGuardando: estado de la vista y función para actualizarlo. */
   const [guardando, cambiarGuardando] = useEstado(false);
-  /* ocupado: referencia estable entre renderizados, sin disparar una actualización visual. */
   const ocupado = useReferencia(false);
-  /* guardado: operación local que atiende el evento o transforma la información. */
   const guardado = () => {
     cambiarAccion(null);
     cambiarRetroalimentacion({
       mensaje: 'Listo. La información se guardó correctamente.',
     });
-    recurso.actualizar();
+    alarmas.actualizar();
+    historial.actualizar();
     window.dispatchEvent(new Event('xentinel:alerts-changed'));
   };
-  /* cerrarAlerta: operación local que atiende el evento o transforma la información. */
-  const cerrarAlerta = async () => {
+  const ejecutar = async (tarea) => {
     if (ocupado.current) return;
     ocupado.current = true;
     cambiarGuardando(true);
     cambiarRetroalimentacion({});
     try {
-      await solicitar(`/alertas/${accion.alerta.id_alerta}/cerrar`, {
-        method: 'PATCH',
-      });
-      guardado();
+      await tarea();
     } catch (error) {
-      cambiarRetroalimentacion({
-        error,
-      });
+      cambiarRetroalimentacion({ error });
     } finally {
       ocupado.current = false;
       cambiarGuardando(false);
     }
   };
-  /* enviarSos: operación local que atiende el evento o transforma la información. */
+  const cerrarAlerta = () =>
+    ejecutar(async () => {
+      await solicitar(`/alertas/${accion.alerta.id_alerta}/cerrar`, {
+        method: 'PATCH',
+      });
+      guardado();
+    });
+  const atenderQr = (alarma) =>
+    ejecutar(async () => {
+      await solicitar(`/alarmas/qr/${alarma.id_alarma}/atender`, {
+        method: 'PATCH',
+      });
+      alarmas.refrescar();
+      cambiarRetroalimentacion({
+        mensaje: `«${alarma.titulo}» quedó marcada como revisada.`,
+      });
+      window.dispatchEvent(new Event('xentinel:alerts-changed'));
+    });
   const enviarSos = () => {
     if (ocupado.current) return;
     if (!navigator.geolocation) {
@@ -500,9 +623,7 @@ function PanelAlertas() {
             mensaje: 'Tu ubicación fue enviada al personal de control.',
           });
         } catch (error) {
-          cambiarRetroalimentacion({
-            error,
-          });
+          cambiarRetroalimentacion({ error });
         } finally {
           ocupado.current = false;
           cambiarGuardando(false);
@@ -516,131 +637,153 @@ function PanelAlertas() {
         ocupado.current = false;
         cambiarGuardando(false);
       },
-      {
-        timeout: 10000,
-        maximumAge: 0,
-        enableHighAccuracy: true,
-      }
+      { timeout: 10000, maximumAge: 0, enableHighAccuracy: true }
     );
   };
+  const conteo = alarmas.metadatos?.conteo || { rojo: 0, amarillo: 0 };
+  const incluyeQr = alarmas.metadatos?.incluye_qr;
+  /* Una alarma de riesgo trae lo necesario para cerrar, reportar o pedir SOS. */
+  const comoAlerta = (alarma) => ({
+    id_alerta: alarma.id_alerta,
+    tipo_alerta: alarma.titulo,
+    severidad: alarma.severidad,
+  });
   return (
     <>
       <div className="xn-panel-titulo">
         <div>
-          <h1>Alertas y emergencias</h1>
-          <p>Sigue las instrucciones de tu institución y mantén la calma.</p>
+          <h1>Alarmas</h1>
+          <p>
+            {incluyeQr
+              ? 'Riesgos críticos y carnets QR vencidos o falsos. Lo normal no aparece aquí.'
+              : 'Riesgos que piden actuar. Sigue las instrucciones y mantén la calma.'}
+          </p>
         </div>
-        {esAdministrador && (
-          <button
-            className="xn-boton"
-            onClick={() =>
-              cambiarAccion({
-                tipo: 'crear',
-              })
-            }
+        <div className="xn-admin-acciones">
+          <span
+            className={`xn-estado ${canal === 'conectado' ? 'es-exito' : 'es-neutro'}`}
+            role="status"
           >
-            Nueva alerta
-          </button>
-        )}
+            {canal === 'conectado' ? 'En vivo' : 'Reconectando…'}
+          </span>
+          {esAdministrador && (
+            <button
+              className="xn-boton"
+              onClick={() => cambiarAccion({ tipo: 'crear' })}
+            >
+              Nueva alerta
+            </button>
+          )}
+        </div>
       </div>
       <MensajeEstado {...retroalimentacion} />
-      <EstadoConsulta recurso={recurso}>
-        <div className="xn-alert-list">
-          <AlertasNavegador />
-          {recurso.datos?.map((alerta) => (
-            <article className="xn-trabajo-tarjeta" key={alerta.id_alerta}>
-              <div className="xn-tarjeta-titulo">
-                <h2>{alerta.tipo_alerta}</h2>
-                <span
-                  className={`xn-estado ${alerta.activa ? 'es-peligro' : 'es-neutro'}`}
+      <AlertasNavegador />
+      <Semaforo conteo={conteo} filtro={filtro} alFiltrar={cambiarFiltro} />
+      <EstadoConsulta recurso={alarmas}>
+        <div className="xn-alarmas" aria-live="polite">
+          {alarmas.datos?.map((alarma) => (
+            <TarjetaAlarma key={alarma.id} alarma={alarma}>
+              {alarma.origen === 'qr' && (
+                <button
+                  className="xn-boton xn-boton--secundario"
+                  disabled={guardando}
+                  onClick={() => atenderQr(alarma)}
                 >
-                  {alerta.activa ? 'Activa' : 'Cerrada'} · {alerta.severidad}
-                </span>
-              </div>
-              <p>{alerta.mensaje}</p>
-              <div className="xn-alert-acciones">
-                {alerta.activa && esAdministrador && (
-                  <button
-                    className="xn-boton xn-boton--secundario"
-                    onClick={() => {
-                      cambiarRetroalimentacion({});
-                      cambiarAccion({
-                        tipo: 'cerrar',
-                        alerta,
-                      });
-                    }}
-                  >
-                    Cerrar alerta
-                  </button>
-                )}
-                {alerta.activa && rol === 'instructor' && (
-                  <button
-                    className="xn-boton"
-                    onClick={() =>
-                      cambiarAccion({
-                        tipo: 'reportar',
-                        alerta,
-                      })
-                    }
-                  >
-                    Enviar pase de lista
-                  </button>
-                )}
-                {alerta.activa && !esAdministrador && (
-                  <button
-                    className="xn-boton xn-boton--peligro"
-                    onClick={() => {
-                      cambiarRetroalimentacion({});
-                      cambiarAccion({
-                        tipo: 'sos',
-                        alerta,
-                      });
-                    }}
-                  >
-                    Solicitar ayuda (SOS)
-                  </button>
-                )}
-                {['admin', 'instructor'].includes(rol) && (
+                  Marcar como revisada
+                </button>
+              )}
+              {alarma.origen === 'riesgo' && esAdministrador && (
+                <button
+                  className="xn-boton xn-boton--secundario"
+                  onClick={() => {
+                    cambiarRetroalimentacion({});
+                    cambiarAccion({ tipo: 'cerrar', alerta: comoAlerta(alarma) });
+                  }}
+                >
+                  Cerrar alerta
+                </button>
+              )}
+              {alarma.origen === 'riesgo' && rol === 'instructor' && (
+                <button
+                  className="xn-boton"
+                  onClick={() =>
+                    cambiarAccion({ tipo: 'reportar', alerta: comoAlerta(alarma) })
+                  }
+                >
+                  Enviar pase de lista
+                </button>
+              )}
+              {alarma.origen === 'riesgo' && !esAdministrador && (
+                <button
+                  className="xn-boton xn-boton--peligro"
+                  onClick={() => {
+                    cambiarRetroalimentacion({});
+                    cambiarAccion({ tipo: 'sos', alerta: comoAlerta(alarma) });
+                  }}
+                >
+                  Solicitar ayuda (SOS)
+                </button>
+              )}
+            </TarjetaAlarma>
+          ))}
+        </div>
+        {!alarmas.datos?.length && (
+          <div className="xn-trabajo-tarjeta xn-alarmas-vacio">
+            <h2>
+              {filtro
+                ? `No hay alarmas en ${SEMAFORO[filtro].nombre.toLowerCase()}.`
+                : 'Todo tranquilo por aquí.'}
+            </h2>
+            <p>
+              {filtro
+                ? 'Elige «Ver todas» para revisar el otro color.'
+                : 'Cuando aparezca un riesgo o un carnet con problemas, lo verás aquí al instante.'}
+            </p>
+          </div>
+        )}
+      </EstadoConsulta>
+      {['admin', 'instructor'].includes(rol) && (
+        <details className="xn-trabajo-tarjeta xn-alarmas-historial">
+          <summary>Historial de alertas, reportes y SOS</summary>
+          <EstadoConsulta recurso={historial}>
+            <ul>
+              {historial.datos?.map((alerta) => (
+                <li key={alerta.id_alerta}>
+                  <span className={`xn-alarma-punto es-${alerta.semaforo}`} />
+                  <div>
+                    <strong>{alerta.tipo_alerta}</strong>
+                    <small>
+                      {alerta.activa ? 'Activa' : 'Cerrada'}, publicada el{' '}
+                      {formatearFecha(alerta.fecha_inicio)}
+                    </small>
+                  </div>
                   <button
                     className="xn-texto-enlace xn-enlace-boton"
-                    onClick={() =>
-                      cambiarAccion({
-                        tipo: 'reportes',
-                        alerta,
-                      })
-                    }
+                    onClick={() => cambiarAccion({ tipo: 'reportes', alerta })}
                   >
                     Ver reportes
                   </button>
-                )}
-                {esAdministrador && (
-                  <button
-                    className="xn-texto-enlace xn-enlace-boton"
-                    onClick={() =>
-                      cambiarAccion({
-                        tipo: 'lista-sos',
-                        alerta,
-                      })
-                    }
-                  >
-                    Ver solicitudes SOS
-                  </button>
-                )}
-              </div>
-            </article>
-          ))}
-        </div>
-        {!recurso.datos?.length && (
-          <div className="xn-trabajo-tarjeta">
-            <h2>Todo tranquilo por aquí.</h2>
-            <p>No hay alertas registradas en esta página.</p>
-          </div>
-        )}
-        <Paginacion
-          paginacion={paginacion}
-          cantidad={recurso.datos?.length || 0}
-        />
-      </EstadoConsulta>
+                  {esAdministrador && (
+                    <button
+                      className="xn-texto-enlace xn-enlace-boton"
+                      onClick={() => cambiarAccion({ tipo: 'lista-sos', alerta })}
+                    >
+                      Ver SOS
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+            {!historial.datos?.length && (
+              <p>Todavía no se ha publicado ninguna alerta.</p>
+            )}
+            <Paginacion
+              paginacion={paginacion}
+              cantidad={historial.datos?.length || 0}
+            />
+          </EstadoConsulta>
+        </details>
+      )}
       {accion?.tipo === 'crear' && (
         <EditorAlerta
           alCerrar={() => cambiarAccion(null)}
