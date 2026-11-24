@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -7,12 +5,12 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../core/qr_codes.dart';
 import '../models/xentinel_models.dart';
 
-/// Credencial del carnet QR firmado guardada en el almacén seguro del sistema
-/// (Android Keystore / Keychain de iOS), para mostrar el carnet sin conexión.
+/// Credencial del carnet QR firmado del titular de la sesión.
 ///
-/// Contiene la clave HMAC del titular y los datos visibles del carnet. No guarda
-/// contraseñas ni JWT. El servidor la revoca al cerrar sesión, cambiar la
-/// contraseña o desactivar la cuenta.
+/// Contiene la clave HMAC del titular y los datos visibles del carnet. Vive solo en
+/// memoria mientras hay sesión: Xentinel valida los carnets en línea y no conserva
+/// un carnet para mostrarlo sin conexión. El servidor la revoca al cerrar sesión,
+/// cambiar la contraseña o desactivar la cuenta.
 class QrCredential {
   const QrCredential({
     required this.userId,
@@ -33,12 +31,6 @@ class QrCredential {
   final Uint8List key;
   final int stepSeconds;
   final DateTime issuedAt;
-
-  /// Una credencial sin renovar en 30 días deja de mostrarse sin conexión.
-  static const maxOfflineAge = Duration(days: 30);
-
-  bool isUsableAt(DateTime now) =>
-      key.length >= 16 && now.difference(issuedAt) < maxOfflineAge;
 
   String codeAt(DateTime serverNow) => XentinelQr.generate(
     key,
@@ -74,36 +66,6 @@ class QrCredential {
       issuedAt: now,
     );
   }
-
-  Map<String, Object> toJson() => {
-    'v': 1,
-    'id': userId,
-    'nombre': name,
-    'documento': documentId,
-    'rol': role.name,
-    'estado': status.name,
-    'clave': base64Url.encode(key),
-    'paso': stepSeconds,
-    'emitida': issuedAt.toUtc().toIso8601String(),
-  };
-
-  static QrCredential? fromJson(Object? json) {
-    if (json is! Map || json['v'] != 1) return null;
-    try {
-      return QrCredential(
-        userId: json['id'] as int,
-        name: json['nombre'] as String,
-        documentId: json['documento'] as String,
-        role: UserRole.values.byName(json['rol'] as String),
-        status: AccessStatus.values.byName(json['estado'] as String),
-        key: base64Url.decode(json['clave'] as String),
-        stepSeconds: json['paso'] as int,
-        issuedAt: DateTime.parse(json['emitida'] as String),
-      );
-    } catch (_) {
-      return null;
-    }
-  }
 }
 
 abstract interface class SecureKeyValueStore {
@@ -131,11 +93,14 @@ class DeviceSecureStore implements SecureKeyValueStore {
   Future<void> delete(String key) => _storage.delete(key: key);
 }
 
-/// Carnet guardado del último titular que inició sesión en este teléfono.
+/// Carnet del titular de la sesión, en memoria.
+///
+/// Las versiones 1.2 y anteriores guardaban la credencial en el almacén seguro para
+/// mostrar el carnet sin conexión; al cargar se borra ese residuo.
 class CredentialStore extends ChangeNotifier {
   CredentialStore(this._store);
 
-  static const _key = 'xentinel_qr_credential_v1';
+  static const _legacyKey = 'xentinel_qr_credential_v1';
   final SecureKeyValueStore _store;
   QrCredential? _current;
   bool _loaded = false;
@@ -148,11 +113,9 @@ class CredentialStore extends ChangeNotifier {
 
   Future<void> _load() async {
     try {
-      final raw = await _store.read(_key);
-      _current = raw == null ? null : QrCredential.fromJson(jsonDecode(raw));
+      await _store.delete(_legacyKey);
     } catch (_) {
-      // Un almacén ilegible (p. ej. tras restaurar otro teléfono) equivale a vacío.
-      _current = null;
+      // Un almacén ilegible no impide usar la app: la credencial nunca se lee de él.
     }
     _loaded = true;
     notifyListeners();
@@ -162,19 +125,11 @@ class CredentialStore extends ChangeNotifier {
     _current = credential;
     _loaded = true;
     notifyListeners();
-    try {
-      await _store.write(_key, jsonEncode(credential.toJson()));
-    } catch (_) {
-      // Sin almacén seguro el carnet funciona igual mientras la app esté abierta.
-    }
   }
 
   Future<void> clear() async {
     _current = null;
     notifyListeners();
-    try {
-      await _store.delete(_key);
-    } catch (_) {}
   }
 }
 

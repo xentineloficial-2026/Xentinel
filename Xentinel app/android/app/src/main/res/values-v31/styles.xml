@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12 y posteriores: el sistema dibuja el arranque con el icono adaptable sobre
+     la tinta de Xentinel, igual que en versiones anteriores. -->
+<resources>
+    <style name="LaunchTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowBackground">@drawable/launch_background</item>
+        <item name="android:windowSplashScreenBackground">@color/xn_tinta</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/xn_tinta</item>
+    </style>
+    <style name="NormalTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/xn_tinta</item>
+    </style>
+</resources>

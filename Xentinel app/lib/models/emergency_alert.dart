@@ -1,3 +1,5 @@
+import 'scan_alarm.dart';
+
 enum AlertSeverity { informativa, moderada, alta, critica }
 
 class EmergencyAlert {
@@ -17,11 +19,22 @@ class EmergencyAlert {
   final String source;
 
   String get fingerprint => '$id|$type|$message|${severity.name}|$source';
+
+  /// Color del semáforo; `null` para la informativa (verde), que no es alarma.
+  Semaforo? get semaforo => switch (severity) {
+    AlertSeverity.critica || AlertSeverity.alta => Semaforo.rojo,
+    AlertSeverity.moderada => Semaforo.amarillo,
+    AlertSeverity.informativa => null,
+  };
+
+  /// Simulacro de la API de gestión de riesgos o publicado como simulacro.
+  bool get isDrill =>
+      source == 'PRUEBA' || type.toLowerCase().contains('simulacro');
   String get severityLabel => switch (severity) {
     AlertSeverity.informativa => 'INFORMATIVA',
-    AlertSeverity.moderada => 'MODERADA',
-    AlertSeverity.alta => 'ALTA',
-    AlertSeverity.critica => 'CRÍTICA',
+    AlertSeverity.moderada => 'AMARILLA (MODERADA)',
+    AlertSeverity.alta => 'ROJA (ALTA)',
+    AlertSeverity.critica => 'ROJA (CRÍTICA)',
   };
 
   factory EmergencyAlert.fromApi(Map<String, dynamic> data) {

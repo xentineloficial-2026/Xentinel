@@ -20,8 +20,8 @@ Lo ideal es compilar directamente con tu firma en `android/key.properties`: `./s
 2. Inicia sesión. El rol Administrador o Celador habilita el escáner; la cámara se pide al abrirlo.
 3. Acepta las notificaciones. En **Alertas** puedes permitir que la alerta sísmica se muestre a pantalla completa con el teléfono bloqueado y que suene en modo No molestar (requiere Firebase, ver `DESPLIEGUE.md`).
 
-El plan gratuito de Render suspende la API tras 15 minutos sin uso: la primera petición posterior puede tardar cerca de un minuto. Mientras tanto, el escáner guarda las lecturas sin conexión y las envía al responder el servidor.
+El plan gratuito de Render suspende la API tras 15 minutos sin uso: la primera petición posterior puede tardar cerca de un minuto. La app valida en línea: mientras la API despierta, el escáner informa que no pudo confirmar y basta con volver a escanear (nunca duplica el movimiento).
 
 ## Qué probar primero
 
-Recorre `VALIDACION.md`, en especial 5a–5e: lectura de celular a celular a distintas distancias y con brillo bajo, teléfonos en redes distintas, modo avión en el escáner y carnet sin conexión.
+Recorre `VALIDACION.md`, en especial 5a–5e: lectura de celular a celular a distintas distancias y con brillo bajo, teléfonos en redes distintas, modo avión en el escáner (no registra y lo avisa) y carnet sin red (pide conectarse).

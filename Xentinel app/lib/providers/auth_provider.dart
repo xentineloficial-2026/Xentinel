@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/errors.dart';
 import '../models/xentinel_models.dart';
 import '../repositories/auth_repository.dart';
-import '../services/background_sync.dart';
 import '../services/biometric_service.dart';
 import '../services/credential_store.dart';
 import '../core/session.dart';
@@ -51,22 +50,13 @@ class AuthController extends AsyncNotifier<void> {
   Future<void> logout() async {
     final session = ref.read(sessionProvider);
     final token = session.token;
-    // Antes de revocar la sesión, enviar los accesos tomados sin conexión.
-    try {
-      await ref
-          .read(backgroundSyncProvider)
-          .flush()
-          .timeout(const Duration(seconds: 6));
-    } catch (_) {
-      /* La cola se conserva para la próxima sesión de este celador. */
-    }
     try {
       await ref.read(authRepositoryProvider).logout();
     } catch (_) {
       /* Local logout remains possible when offline. */
     } finally {
       if (session.token == token) session.clear();
-      // El servidor revoca el carnet al cerrar sesión: no se conserva sin conexión.
+      // El servidor revoca el carnet al cerrar sesión; la clave sale de la memoria.
       await ref.read(credentialStoreProvider).clear();
     }
   }

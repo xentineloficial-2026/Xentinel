@@ -36,7 +36,7 @@ class CarnetState {
   final DateTime? generatedAt;
   final DateTime? refreshAt;
 
-  /// Firmado por el servidor: se valida aunque el lector esté sin conexión.
+  /// Firmado con la clave del titular: el servidor verifica que es auténtico.
   final bool signed;
 
   bool get hasQr => qrPayload.isNotEmpty;
@@ -103,25 +103,4 @@ class CarnetNotifier extends _RotatingCarnet {
 final carnetProvider =
     NotifierProvider.autoDispose<CarnetNotifier, CarnetState>(
       CarnetNotifier.new,
-    );
-
-/// Carnet sin conexión ni sesión, a partir de la credencial guardada.
-class OfflineCarnetNotifier extends _RotatingCarnet {
-  @override
-  CarnetState build() {
-    final credential = ref.watch(
-      credentialStoreProvider.select((store) => store.current),
-    );
-    ref.onDispose(_stop);
-    _stop();
-    if (credential == null || !credential.isUsableAt(DateTime.now())) {
-      return const CarnetState.empty();
-    }
-    return _start(credential.codeAt, true);
-  }
-}
-
-final offlineCarnetProvider =
-    NotifierProvider.autoDispose<OfflineCarnetNotifier, CarnetState>(
-      OfflineCarnetNotifier.new,
     );

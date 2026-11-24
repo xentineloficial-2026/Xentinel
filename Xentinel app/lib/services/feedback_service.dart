@@ -27,13 +27,15 @@ class FeedbackService {
 
   Future<void> play(AccessScanResult result) async {
     final (sound, pattern) = switch (result) {
-      Granted() => ('sounds/ok.wav', <int>[0, 150]),
+      // Entrada: dos notas que suben y una vibración. Salida: las mismas notas
+      // bajando y dos vibraciones cortas. Se distinguen sin mirar la pantalla.
+      Granted(isExit: false) => ('sounds/ok.wav', <int>[0, 150]),
+      Granted(isExit: true) => ('sounds/salida.wav', <int>[0, 70, 90, 70]),
       Alert() => ('sounds/warn.wav', <int>[0, 200, 100, 200]),
       NotRegistered() => ('sounds/warn.wav', <int>[0, 200, 100, 200]),
       Denied() => ('sounds/error.wav', <int>[0, 500]),
       VisitorAccess() => ('sounds/ok.wav', <int>[0, 100, 80, 100]),
       Unconfirmed() => ('sounds/warn.wav', <int>[0, 200, 100, 200]),
-      QueuedOffline() => ('sounds/ok.wav', <int>[0, 120, 90, 120, 90, 120]),
     };
 
     try {
