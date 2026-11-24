@@ -1,136 +1,751 @@
-/* Descarga independiente de React: utiliza la misma identidad, fuente y preferencia de tema. */
+/* Descarga independiente de React. Usa los tokens de tema.css y replica la cabecera
+   flotante de la web principal (publico.css) para que ambas se vean iguales. */
 * {
   box-sizing: border-box;
 }
+html {
+  scroll-padding-top: 110px;
+}
 body {
   margin: 0;
+  min-height: 100vh;
   font-family: var(--xn-fuente);
   background: var(--xn-fondo);
   color: var(--xn-texto);
-  line-height: 1.7;
+  line-height: 1.6;
+  overflow-x: clip;
 }
-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 24px 6%;
-  border-bottom: 1px solid var(--xn-borde);
+h1,
+h2,
+h3,
+p,
+figure,
+dl,
+dd {
+  margin: 0;
 }
-.marca {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 24px;
-  font-weight: 600;
+h1,
+h2,
+h3 {
   color: var(--xn-texto);
-  text-decoration: none;
-  letter-spacing: -1px;
-}
-.marca img {
-  object-fit: contain;
-  border-radius: 8px;
-}
-nav {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  font-size: 12px;
+  text-wrap: balance;
 }
 a {
-  color: var(--xn-azul);
+  color: inherit;
+  text-decoration: none;
 }
 button {
   font: inherit;
-  color: var(--xn-texto);
-  background: var(--xn-superficie);
-  border: 1px solid var(--xn-borde);
-  border-radius: 8px;
-  padding: 10px 14px;
 }
-main {
-  max-width: 850px;
-  margin: auto;
-  padding: 80px 24px;
-}
-.antetitulo {
-  font-size: 14px;
-  color: var(--xn-tenue);
-}
-h1 {
-  font-size: clamp(40px, 6vw, 74px);
-  line-height: 1.04;
-  letter-spacing: -0.03em;
-  font-weight: 600;
-  margin: 25px 0;
-}
-h2 {
-  font-size: 21px;
-  letter-spacing: -0.6px;
-  font-weight: 600;
-}
-p,
-li {
-  color: var(--xn-tenue);
-  font-size: 14px;
-}
-.tarjeta {
-  background: var(--xn-superficie);
-  border: 1px solid var(--xn-borde);
-  padding: 30px;
-  border-radius: 18px;
-  margin: 30px 0;
-}
-.tarjeta h2 {
-  margin: 0 0 20px;
-}
-.tarjeta ol {
-  padding-left: 18px;
-}
-.tarjeta li {
-  margin-bottom: 15px;
-}
-.boton {
-  display: inline-block;
-  margin-top: 20px;
-  background: var(--xn-accion);
-  color: var(--xn-accion-texto);
-  font-weight: 600;
-  padding: 15px 22px;
-  border-radius: var(--xn-radio-m);
-  text-decoration: none;
-}
-.boton:hover {
-  background: var(--xn-accion-cursor);
-}
-.pequeno {
-  font-size: 12px;
-}
-.huella {
-  overflow-wrap: anywhere;
-  font-family: var(--xn-mono);
-}
-.volver {
-  display: inline-block;
-  margin-top: 30px;
-}
-footer {
-  padding: 30px 6%;
-  border-top: 1px solid var(--xn-borde);
-  font-size: 12px;
-  color: var(--xn-tenue);
+svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 [hidden] {
   display: none !important;
 }
-@media (max-width: 500px) {
-  header {
-    flex-wrap: wrap;
+:focus-visible {
+  outline: 2px solid var(--xn-texto);
+  outline-offset: 3px;
+}
+.salto {
+  position: absolute;
+  left: 16px;
+  top: -60px;
+  z-index: 40;
+  padding: 10px 14px;
+  border-radius: var(--xn-radio-s);
+  background: var(--xn-accion);
+  color: var(--xn-accion-texto);
+}
+.salto:focus {
+  top: 12px;
+}
+
+/* Cabecera: la misma cápsula de vidrio flotante de la web principal. */
+.cabecera {
+  position: sticky;
+  top: 14px;
+  z-index: 20;
+  padding: 14px 24px 0;
+}
+.cabecera-interior {
+  max-width: 1320px;
+  margin: auto;
+  padding: 10px 12px 10px 20px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 28px;
+  min-height: 64px;
+  background: var(--xn-vidrio);
+  border: 1px solid var(--xn-vidrio-borde);
+  border-radius: 20px;
+  backdrop-filter: blur(22px) saturate(1.3);
+  -webkit-backdrop-filter: blur(22px) saturate(1.3);
+  box-shadow: 0 16px 40px -24px #000a;
+}
+.marca {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--xn-texto);
+  flex-shrink: 0;
+}
+.marca svg {
+  width: 26px;
+  height: 29px;
+  fill: currentColor;
+  stroke: none;
+  flex-shrink: 0;
+}
+.navegacion {
+  position: relative;
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+/* Cápsula que se desliza hacia el enlace bajo el cursor, como en la portada. */
+.navegacion::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--ancho, 0);
+  transform: translateX(var(--x, 0));
+  border-radius: 12px;
+  background: var(--xn-vidrio-borde);
+  box-shadow: inset 0 0 0 1px var(--xn-vidrio-borde);
+  transition:
+    transform 0.34s cubic-bezier(0.16, 1, 0.3, 1),
+    width 0.34s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.navegacion a {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 14px;
+  border-radius: 12px;
+  color: var(--xn-tenue);
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: color 0.16s;
+}
+.navegacion a:hover {
+  color: var(--xn-texto);
+}
+.flecha-diagonal {
+  width: 13px;
+  height: 13px;
+}
+.navegacion .movil-ingreso {
+  display: none;
+}
+.cabecera-acciones {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.cabecera-ingreso {
+  padding: 8px 6px;
+  color: var(--xn-texto);
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.cabecera-ingreso:hover {
+  color: var(--xn-tenue);
+}
+.icono-boton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  height: 42px;
+  padding: 0;
+  border: 1px solid var(--xn-vidrio-borde);
+  border-radius: var(--xn-radio-s);
+  background: transparent;
+  color: var(--xn-texto);
+  cursor: pointer;
+  transition: background 0.16s;
+}
+.icono-boton:hover {
+  background: var(--xn-vidrio-borde);
+}
+.icono-boton svg {
+  width: 19px;
+  height: 19px;
+}
+/* El conmutador muestra el sol en el tema oscuro y la luna en el claro. */
+[data-theme='dark'] .icono-luna,
+[data-theme='light'] .icono-sol {
+  display: none;
+}
+.menu-conmutador {
+  display: none;
+}
+.menu-conmutador .icono-cerrar,
+.menu-conmutador[aria-expanded='true'] .icono-abrir {
+  display: none;
+}
+.menu-conmutador[aria-expanded='true'] .icono-cerrar {
+  display: block;
+}
+
+/* Botones: la acción principal es la pieza más clara de la pantalla. */
+.boton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 12px 20px;
+  border-radius: var(--xn-radio-m);
+  background: var(--xn-accion);
+  color: var(--xn-accion-texto);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  cursor: pointer;
+  transition:
+    background 0.16s ease,
+    transform 0.16s ease;
+}
+.boton:hover {
+  background: var(--xn-accion-cursor);
+}
+.boton:active {
+  transform: scale(0.98);
+}
+.boton svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  transition: transform 0.18s ease;
+}
+.boton:hover svg {
+  transform: translateY(2px);
+}
+.boton--cabecera {
+  min-height: 42px;
+  padding: 9px 15px;
+  font-size: 13px;
+}
+.boton--grande {
+  width: 100%;
+  min-height: 56px;
+  font-size: 16px;
+}
+.boton--grande svg {
+  width: 19px;
+  height: 19px;
+}
+
+/* Portada: texto y descarga a la izquierda, la app real a la derecha. */
+main {
+  max-width: 1320px;
+  margin: auto;
+  padding: 0 24px;
+}
+main:focus {
+  outline: none;
+}
+.portada {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  align-items: center;
+  gap: 64px;
+  padding: 56px 0 96px;
+}
+.portada-texto {
+  max-width: 600px;
+}
+.volver {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 36px;
+  color: var(--xn-tenue);
+  font-size: 14px;
+  font-weight: 500;
+  transition: color 0.16s;
+}
+.volver-icono {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--xn-borde);
+  border-radius: 50%;
+  color: var(--xn-texto);
+  transition:
+    background 0.16s,
+    transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.volver-icono svg {
+  width: 17px;
+  height: 17px;
+}
+.volver:hover {
+  color: var(--xn-texto);
+}
+.volver:hover .volver-icono {
+  background: var(--xn-superficie-alterna);
+  transform: translateX(-3px);
+}
+h1 {
+  font-size: clamp(40px, 5.4vw, 72px);
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+  font-weight: 600;
+}
+.entrada {
+  max-width: 34em;
+  margin-top: 22px;
+  color: var(--xn-tenue);
+  font-size: 18px;
+  line-height: 1.55;
+}
+
+/* Tarjeta de descarga: el único bloque con relieve de la portada. */
+.tarjeta-descarga {
+  margin-top: 40px;
+  padding: 28px;
+  border: 1px solid var(--xn-borde);
+  border-radius: 22px;
+  background: var(--xn-superficie);
+  box-shadow: var(--xn-sombra);
+}
+.tarjeta-cabecera {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.app-icono {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  border-radius: 14px;
+  background: #06141b;
+  color: #edf0ef;
+  box-shadow: inset 0 0 0 1px #ccd0cf26;
+}
+.app-icono svg {
+  width: 28px;
+  height: 31px;
+  fill: currentColor;
+  stroke: none;
+}
+.tarjeta-descarga h2 {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+.estado {
+  margin-top: 2px;
+  color: var(--xn-tenue);
+  font-size: 14px;
+}
+.meta {
+  margin-top: 12px;
+  color: var(--xn-tenue);
+  font-size: 13px;
+  text-align: center;
+}
+details {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--xn-borde);
+  font-size: 14px;
+}
+summary {
+  cursor: pointer;
+  color: var(--xn-texto);
+  font-weight: 500;
+}
+details p {
+  margin-top: 10px;
+  color: var(--xn-tenue);
+  font-size: 13px;
+}
+.huella {
+  padding: 10px 12px;
+  border-radius: var(--xn-radio-s);
+  background: var(--xn-superficie-alterna);
+  color: var(--xn-texto);
+  font-family: var(--xn-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.aviso {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+  padding: 14px 16px;
+  border-radius: var(--xn-radio-m);
+  background: var(--xn-aviso-suave);
+  color: var(--xn-texto);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.aviso svg {
+  width: 19px;
+  height: 19px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--xn-aviso);
+}
+.aviso p {
+  color: var(--xn-tenue);
+}
+.aviso strong {
+  color: var(--xn-texto);
+  font-weight: 600;
+}
+
+/* Dos teléfonos con capturas reales de la app 1.3.0. */
+.telefonos {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  padding: 24px 0 8px;
+}
+.telefonos::before {
+  content: '';
+  position: absolute;
+  inset: 6% 4% 14%;
+  z-index: -1;
+  border-radius: 50%;
+  background: radial-gradient(
+    closest-side,
+    var(--xn-superficie-alterna),
+    transparent
+  );
+}
+.telefono {
+  width: min(300px, 62vw);
+  aspect-ratio: 585 / 1266;
+  padding: 9px;
+  border-radius: 46px;
+  background: #050d12;
+  box-shadow:
+    inset 0 0 0 1px #ccd0cf2e,
+    0 40px 80px -32px #000c;
+}
+.telefono img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 38px;
+  object-fit: cover;
+}
+.telefono--frente {
+  grid-area: 1 / 1;
+  transform: translateX(-22%);
+}
+.telefono--atras {
+  grid-area: 1 / 1;
+  transform: translate(34%, -7%) scale(0.88);
+  opacity: 0.94;
+}
+.telefonos figcaption {
+  margin-top: 26px;
+  color: var(--xn-tenue);
+  font-size: 13px;
+}
+
+/* Secciones de apoyo: título a la izquierda, contenido en cuadrícula. */
+.seccion {
+  padding: 88px 0;
+  border-top: 1px solid var(--xn-borde);
+}
+.seccion-cabecera {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 40px;
+}
+.seccion h2 {
+  font-size: clamp(28px, 3vw, 40px);
+  line-height: 1.1;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+.seccion-cabecera p {
+  max-width: 30em;
+  color: var(--xn-tenue);
+  font-size: 16px;
+}
+.pasos,
+.funciones {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pasos li,
+.funciones li {
+  padding: 28px;
+  border: 1px solid var(--xn-borde);
+  border-radius: var(--xn-radio-l);
+  background: var(--xn-superficie);
+}
+.paso-numero {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin-bottom: 28px;
+  border-radius: 50%;
+  background: var(--xn-accion);
+  color: var(--xn-accion-texto);
+  font-size: 15px;
+  font-weight: 600;
+}
+.pasos h3,
+.funciones h3 {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+.pasos p,
+.funciones p {
+  margin-top: 8px;
+  color: var(--xn-tenue);
+  font-size: 15px;
+}
+.funciones li {
+  background: transparent;
+}
+.funciones svg {
+  width: 26px;
+  height: 26px;
+  margin-bottom: 28px;
+  stroke-width: 1.6;
+}
+.requisitos {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 3fr);
+  gap: 32px;
+  align-items: start;
+}
+.requisitos dl {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 24px;
+}
+.requisitos dl > div {
+  padding-top: 16px;
+  border-top: 2px solid var(--xn-texto);
+}
+.requisitos dt {
+  color: var(--xn-tenue);
+  font-size: 13px;
+  font-weight: 500;
+}
+.requisitos dd {
+  margin-top: 6px;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+/* Pie: misma línea final de la web principal. */
+.pie {
+  border-top: 1px solid var(--xn-borde);
+}
+.pie-interior {
+  max-width: 1320px;
+  margin: auto;
+  padding: 32px 24px 40px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 32px;
+  color: var(--xn-tenue);
+  font-size: 13px;
+}
+.pie .marca {
+  font-size: 17px;
+}
+.pie .marca svg {
+  width: 22px;
+  height: 24px;
+}
+.pie-enlace {
+  margin-left: auto;
+  color: var(--xn-texto);
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: var(--xn-borde);
+  text-underline-offset: 5px;
+  transition: text-decoration-color 0.16s;
+}
+.pie-enlace:hover {
+  text-decoration-color: currentColor;
+}
+
+/* Una sola entrada: los teléfonos suben al cargar la página. */
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+  .telefono {
+    animation: subir 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .telefono--frente {
+    animation-delay: 0.08s;
+  }
+  @keyframes subir {
+    from {
+      opacity: 0;
+      translate: 0 28px;
+    }
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+/* Distribución adaptable: igual que la cabecera principal bajo 1180 px. */
+@media (max-width: 1180px) {
+  .cabecera-interior {
+    padding-left: 16px;
+  }
+  .menu-conmutador {
+    display: inline-flex;
+    order: 2;
+  }
+  .cabecera-acciones {
+    order: 1;
+  }
+  .cabecera-ingreso {
+    display: none;
+  }
+  .navegacion {
+    display: none;
+    order: 3;
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    padding: 10px 0 4px;
+    border-top: 1px solid var(--xn-vidrio-borde);
+  }
+  .navegacion.esta-abierta {
+    display: flex;
+  }
+  .navegacion a {
+    min-height: 44px;
+  }
+  .navegacion::before {
+    display: none;
+  }
+  .navegacion .movil-ingreso {
+    display: inline-flex;
+  }
+}
+@media (max-width: 960px) {
+  .portada {
+    grid-template-columns: 1fr;
+    gap: 40px;
+    padding: 40px 0 72px;
+  }
+  .portada-texto {
+    max-width: 640px;
+  }
+  .pasos,
+  .funciones {
+    grid-template-columns: 1fr;
+  }
+  .requisitos {
+    grid-template-columns: 1fr;
+  }
+  .requisitos dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 640px) {
+  .cabecera {
+    top: 8px;
+    padding: 8px 16px 0;
+  }
+  .cabecera-acciones {
+    gap: 8px;
+  }
+  .boton--cabecera {
+    width: 42px;
+    padding: 9px;
+  }
+  .boton--cabecera span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
   }
   main {
-    padding-top: 50px;
+    padding: 0 16px;
   }
-  .tarjeta {
-    padding: 24px;
+  .portada {
+    padding-top: 28px;
+  }
+  .volver {
+    margin-bottom: 28px;
+  }
+  .entrada {
+    font-size: 16px;
+  }
+  .tarjeta-descarga {
+    margin-top: 32px;
+    padding: 20px;
+    border-radius: 18px;
+  }
+  .telefono {
+    width: min(230px, 56vw);
+    border-radius: 36px;
+    padding: 7px;
+  }
+  .telefono img {
+    border-radius: 30px;
+  }
+  .seccion {
+    padding: 64px 0;
+  }
+  .seccion-cabecera {
+    margin-bottom: 28px;
+  }
+  .pasos li,
+  .funciones li {
+    padding: 22px;
+  }
+  .requisitos dl {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+  .pie-interior {
+    padding: 28px 16px 36px;
+  }
+  .pie-enlace {
+    margin-left: 0;
   }
 }
