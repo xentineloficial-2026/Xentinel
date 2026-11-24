@@ -1,0 +1,571 @@
+{
+  "info": {
+    "name": "Xentinel: riesgos, alarmas y correo",
+    "description": "Guía completa en docs/RIESGOS.md y docs/CORREO.md. Define base (p. ej. https://xentinel-api.onrender.com/api/v1), documento y contrasena de un Administrador, y correo_prueba.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Iniciar sesión (Administrador)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base}}/auth/login",
+          "host": [
+            "{{base}}"
+          ],
+          "path": [
+            "auth",
+            "login"
+          ]
+        },
+        "description": "Guarda el token en la variable de colección `token`. Las rutas de /riesgos piden Administrador.",
+        "auth": {
+          "type": "noauth"
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"documento\": \"{{documento}}\",\n  \"contrasena\": \"{{contrasena}}\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const datos = pm.response.json().data;",
+              "pm.test('ingresó', () => pm.expect(datos.access_token).to.be.a('string'));",
+              "pm.collectionVariables.set('token', datos.access_token);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Reglas vigentes del semáforo",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base}}/riesgos/configuracion",
+          "host": [
+            "{{base}}"
+          ],
+          "path": [
+            "riesgos",
+            "configuracion"
+          ]
+        },
+        "description": "Sede, radio, magnitud mínima, monitor y tabla del semáforo.",
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "3a. Evaluar: rojo (M6.2 a 18 km)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base}}/riesgos/evaluar",
+          "host": [
+            "{{base}}"
+          ],
+          "path": [
+            "riesgos",
+            "evaluar"
+          ]
+        },
+        "description": "No guarda ni notifica nada.",
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"magnitud\": 6.2,\n  \"latitud\": 4.5,\n  \"longitud\": -74.2\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('rojo', () => pm.expect(pm.response.json().data.semaforo).to.eql('rojo'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3b. Evaluar: amarillo (M4.3 a 37 km)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base}}/riesgos/evaluar",
+          "host": [
+            "{{base}}"
+          ],
+          "path": [
+            "riesgos",
+            "evaluar"
+          ]
+        },
+        "description": "",
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"magnitud\": 4.3,\n  \"latitud\": 4.9,\n  \"longitud\": -74.3\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('amarillo', () => pm.expect(pm.response.json().data.semaforo).to.eql('amarillo'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3c. Evaluar: verde (M4.2 a 262 km)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base}}/riesgos/evaluar",
+          "host": [
+            "{{base}}"
+          ],
+          "path": [
+            "riesgos",
+            "evaluar"
+          ]
+        },
+        "description": "",
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"magnitud\": 4.2,\n  \"latitud\": 6.5,\n  \"longitud\": -75.5\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const d = pm.response.json().data;",
+              "pm.test('verde sin alarma', () => { pm.expect(d.semaforo).to.eql('verde'); pm.expect(d.genera_alarma).to.eql(false); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Simulacro rojo de punta a punta",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base}}/riesgos/simular",
+          "host": [
+            "{{base}}"
+          ],
+          "path": [
+            "riesgos",
+            "simular"
+          ]
+        },
+        "description": "Avisa antes: interrumpe la web y la app de todas las personas con sesión abierta, marcado como Simulacro. Guarda id_alerta para cerrarla en el paso 7.",
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"magnitud\": 5.4,\n  \"latitud\": 4.5,\n  \"longitud\": -74.2,\n  \"lugar\": \"Simulacro de evacuación\",\n  \"notificar\": false\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const d = pm.response.json().data;",
+              "pm.test('crea la alerta roja', () => pm.expect(d.alerta.semaforo).to.eql('rojo'));",
+              "pm.collectionVariables.set('id_alerta', d.alerta.id_alerta);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Alarmas vigentes (rojo primero)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base}}/alarmas",
+          "host": [
+            "{{base}}"
+          ],
+          "path": [
+            "alarmas"
+          ]
+        },
+        "description": "meta.conteo trae cuántas hay de cada color; Celador y Administrador ven también las de escaneo QR.",
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "5b. Solo alarmas rojas",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base}}/alarmas?semaforo=rojo",
+          "host": [
+            "{{base}}"
+          ],
+          "path": [
+            "alarmas"
+          ],
+          "query": [
+            {
+              "key": "semaforo",
+              "value": "rojo"
+            }
+          ]
+        },
+        "description": "",
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "6. Historial de sismos con semáforo",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base}}/riesgos/sismos?limit=10",
+          "host": [
+            "{{base}}"
+          ],
+          "path": [
+            "riesgos",
+            "sismos"
+          ],
+          "query": [
+            {
+              "key": "limit",
+              "value": "10"
+            }
+          ]
+        },
+        "description": "",
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "7. Cerrar el simulacro",
+      "request": {
+        "method": "PATCH",
+        "header": [],
+        "url": {
+          "raw": "{{base}}/alertas/{{id_alerta}}/cerrar",
+          "host": [
+            "{{base}}"
+          ],
+          "path": [
+            "alertas",
+            "{{id_alerta}}",
+            "cerrar"
+          ]
+        },
+        "description": "",
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "8. Reportar un QR ajeno (alarma roja)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base}}/alarmas/qr",
+          "host": [
+            "{{base}}"
+          ],
+          "path": [
+            "alarmas",
+            "qr"
+          ]
+        },
+        "description": "201 la primera vez; 200 con la misma alarma si se repite antes de 2 minutos.",
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"motivo\": \"QR_INVALIDO\",\n  \"contenido\": \"https://example.org/promo\",\n  \"tipo\": \"ENTRADA\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set('id_alarma', pm.response.json().data.id_alarma);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. Marcar la alarma QR como revisada",
+      "request": {
+        "method": "PATCH",
+        "header": [],
+        "url": {
+          "raw": "{{base}}/alarmas/qr/{{id_alarma}}/atender",
+          "host": [
+            "{{base}}"
+          ],
+          "path": [
+            "alarmas",
+            "qr",
+            "{{id_alarma}}",
+            "atender"
+          ]
+        },
+        "description": "",
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "10. Estado del correo",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base}}/correo/estado",
+          "host": [
+            "{{base}}"
+          ],
+          "path": [
+            "correo",
+            "estado"
+          ]
+        },
+        "description": "Transporte, remitente, cola de 24 h y último fallo con su causa.",
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "11. Enviar correo de prueba",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base}}/correo/prueba",
+          "host": [
+            "{{base}}"
+          ],
+          "path": [
+            "correo",
+            "prueba"
+          ]
+        },
+        "description": "200 si el proveedor lo aceptó; 502 con la causa exacta (p. ej. GMAIL_AUTH: HTTP 400 invalid_grant); 503 si falta configurarlo.",
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"destino\": \"{{correo_prueba}}\"\n}"
+        }
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "base",
+      "value": "http://127.0.0.1:8000/api/v1"
+    },
+    {
+      "key": "documento",
+      "value": ""
+    },
+    {
+      "key": "contrasena",
+      "value": ""
+    },
+    {
+      "key": "correo_prueba",
+      "value": ""
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "id_alerta",
+      "value": ""
+    },
+    {
+      "key": "id_alarma",
+      "value": ""
+    }
+  ]
+}

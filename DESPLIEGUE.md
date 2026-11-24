@@ -44,9 +44,11 @@ pg_restore --no-owner --no-acl --clean --if-exists --dbname="DATABASE_URL_DE_REN
 
 Usa el mismo `DATABASE_URL` del backend, para que las tablas sigan siendo de `xentinel_api`. `pg_restore` puede mostrar avisos sobre extensiones o el esquema `public`. Después, en Render, abre `xentinel-api` y elige **Manual Deploy > Restart service**: al arrancar se aplican las migraciones que falten.
 
-## 3. Correo de recuperación con Gmail
+## 3. Correo con Gmail (recuperación y cambio de correo)
 
-La recuperación de contraseña envía un **código de 6 dígitos** que vence a los 15 minutos, admite 5 intentos y se puede pedir 3 veces cada 15 minutos por correo. Se usa la cuenta de Gmail oficial de Xentinel. Sin correo configurado, la API funciona igual y la recuperación responde que no está disponible. Gmail permite unos 500 envíos al día desde una cuenta personal.
+La recuperación de contraseña y el cambio de correo envían un **código de 6 dígitos** que vence a los 15 minutos, admite 5 intentos y se puede pedir 3 veces cada 15 minutos. Se usa la cuenta de Gmail oficial de Xentinel. Sin correo configurado, la API funciona igual y esos flujos responden `503 MAIL_NOT_CONFIGURED`. Gmail permite unos 500 envíos al día desde una cuenta personal.
+
+> **Estado al 24 de noviembre de 2026:** los registros de `xentinel-api` dicen «Correo sin configurar» en cada arranque: en Render no hay credenciales de correo y por eso no llegaba ningún código. Sigue la opción A y comprueba el envío como indica [`docs/CORREO.md`](Xentinel%20web/BackEnd/docs/CORREO.md), que también explica cada código de fallo.
 
 **Opción A: Gmail API (funciona en el plan gratis de Render).** Render gratis bloquea los puertos SMTP, así que el envío va por HTTPS:
 
@@ -54,7 +56,8 @@ La recuperación de contraseña envía un **código de 6 dígitos** que vence a 
 2. En **Google Auth Platform > Branding/Audience**, configura la pantalla de consentimiento como **Externa**, y en **Audience** cambia el estado a **In production**. En modo de prueba el permiso vence cada 7 días. Google mostrará un aviso de app no verificada al autorizar: es normal para uso propio.
 3. En **Clients**, crea un **ID de cliente OAuth** de tipo **Aplicación web** con el URI de redirección `https://developers.google.com/oauthplayground`.
 4. Abre <https://developers.google.com/oauthplayground>, pulsa el engranaje, marca **Use your own OAuth credentials** y pega el ID y el secreto del cliente. En el paso 1 escribe el alcance `https://www.googleapis.com/auth/gmail.send`, autoriza con la cuenta de Xentinel y en el paso 2 pulsa **Exchange authorization code for tokens**. Copia el **Refresh token**.
-5. En Render, `xentinel-api` > **Environment**: `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` y `SMTP_FROM` (`Xentinel <correo-de-xentinel@gmail.com>`).
+5. En Render, `xentinel-api` > **Environment**: `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` y, opcional, `SMTP_FROM` (`Xentinel <correo-de-xentinel@gmail.com>`; sin él, Gmail usa la cuenta autorizada).
+6. Al reiniciar, el registro dice `Correo listo por gmail`. Prueba el envío en `/docs` con `POST /api/v1/correo/prueba` (sesión de administrador): si falla, la respuesta trae la causa exacta, por ejemplo `invalid_grant`.
 
 **Opción B: contraseña de aplicación por SMTP (en tu PC o en un plan de pago de Render).**
 
@@ -149,4 +152,8 @@ En el panel de Render, cambia `xentinel-api` a un plan de pago para que no se du
 
 ## Qué funciona sin internet
 
-Dos teléfonos no pueden validar un acceso entre sí sin un servidor común. Con el servidor en internet sirve cualquier Wi-Fi o datos móviles. Sin conexión, el escáner guarda cada lectura en el teléfono y la envía al servidor cuando vuelve la red, y el carnet se puede mostrar sin conexión tras iniciar sesión una vez.
+Dos teléfonos no pueden validar un acceso entre sí sin un servidor común. Con el servidor en internet sirve cualquier Wi-Fi o datos móviles. Desde la app 1.3.0 la validación de QR es **solo en línea**: sin conexión el escáner no registra y lo avisa, y el carnet pide conectarse en lugar de mostrar el código. El registro manual por documento de la web sigue disponible para esos casos.
+
+## Alarmas y gestión de riesgos
+
+Las alarmas de la web y de la app muestran solo rojo y amarillo: riesgos críticos (sismos de EMSC/USGS y alertas de administración) y carnets QR vencidos o que no son verídicos. Para probarlas sin esperar un sismo real hay un simulacro de punta a punta en la API: [`docs/RIESGOS.md`](Xentinel%20web/BackEnd/docs/RIESGOS.md).

@@ -13,11 +13,15 @@ Base: `/api/v1`. JSON UTF-8. `Authorization: Bearer <access_token>` en rutas pro
 | GET `/auth/me`                                    | Sesión                              | Perfil sin hash ni secretos                                                                                 |
 | POST `/auth/logout`                               | Sesión                              | Revoca todas las sesiones del usuario; 204                                                                  |
 | POST `/auth/renovar`                              | Sesión                              | Nuevo JWT con el mismo formato de login; máximo `SESSION_MAX_HOURS` desde el ingreso; 401 `SESSION_MAX_AGE` |
-| GET `/auth/credencial-qr`                         | Sesión                              | Clave del carnet QR rotativo firmado (XN2) del titular, para generarlo también sin conexión                 |
+| GET `/auth/credencial-qr`                         | Sesión                              | Clave del carnet QR rotativo firmado (XN2) del titular; la app la guarda solo en memoria                    |
 | PUT `/auth/contrasena`                            | Sesión                              | `{actual,nueva}`; revoca sesiones y recuperación; 204                                                       |
 | POST `/auth/olvide-contrasena`                    | Público, limitado                   | `{correo}`; 202 genérico; envía un código de 6 dígitos (15 min, 3 solicitudes/15 min por correo)            |
 | POST `/auth/validar-recuperacion`                 | Público, limitado                   | `{correo,codigo}`; `{valid:true}` sin consumir el código; cada fallo cuenta (5 máximo)                      |
 | POST `/auth/restablecer-contrasena`               | Público, limitado                   | `{correo,codigo,contrasena}`; revalidación y consumo atómico; 400 `INVALID_RESET_CODE`                      |
+| POST `/auth/correo/solicitar`                     | Sesión, 3 cada 15 min               | `{correo,contrasena}`; 202 y código de 6 dígitos al correo nuevo; 409 `SAME_EMAIL`/`EMAIL_IN_USE`           |
+| POST `/auth/correo/confirmar`                     | Sesión                              | `{codigo}`; cambia el correo (5 intentos, uso único) y revoca las sesiones; 400 `INVALID_RESET_CODE`        |
+| GET `/correo/estado`                              | Administrador                       | Transporte (`gmail`/`smtp`/`null`), remitente, cola de 24 h y último fallo con su causa                     |
+| POST `/correo/prueba`                             | Administrador, 5 cada 15 min        | `{destino}`; envía ya un correo de prueba; 502 `MAIL_DELIVERY_FAILED` con la causa, 503 sin correo          |
 | GET `/usuarios`                                   | Administrador                       | Filtros `id_rol` y `estado=Activo/Inactivo`. Con `estado` devuelve ambos conteos en `meta.totales`          |
 | POST `/usuarios`                                  | Administrador                       | Datos de registro más `id_rol`                                                                              |
 | GET `/usuarios/:id`                               | Propietario / administrador         | Perfil                                                                                                      |
@@ -25,9 +29,9 @@ Base: `/api/v1`. JSON UTF-8. `Authorization: Bearer <access_token>` en rutas pro
 | DELETE `/usuarios/:id`                            | Administrador                       | Desactivación lógica; conserva historial; 204                                                               |
 | GET `/usuarios/:id/fichas`                        | Propietario / administrador         | Asignaciones vigentes                                                                                       |
 | GET `/ingresos`                                   | Sesión                              | Propios; solo administrador consulta todos o filtra `id_usuarios`                                           |
-| POST `/ingresos`                                  | Celador / administrador             | `{id_usuarios\|codigo_qr,tipo,metodo,request_id,escaneado_en?}`; ver «Carnet QR firmado»                    |
-| GET `/alertas`                                    | Sesión                              | Historial paginado; filtro `activa=true/false`                                                              |
-| GET `/alertas/activas`                            | Sesión                              | Todas las activas                                                                                           |
+| POST `/ingresos`                                  | Celador / administrador             | `{id_usuarios\|codigo_qr,tipo,metodo,request_id,escaneado_en?}`; QR vencido o falso deja una alarma         |
+| GET `/alertas`                                    | Sesión                              | Historial paginado sin verdes; filtro `activa=true/false`; cada fila trae `semaforo`                        |
+| GET `/alertas/activas`                            | Sesión                              | Activas en rojo o amarillo (la informativa, verde, se omite)                                                |
 | GET `/alertas/:id`                                | Sesión                              | Detalle                                                                                                     |
 | POST `/alertas`                                   | Administrador                       | Tipo, mensaje, severidad, fuente y referencia opcional                                                      |
 | PATCH `/alertas/:id/cerrar`                       | Administrador                       | Cierra sólo esa alerta; idempotente                                                                         |
@@ -36,19 +40,30 @@ Base: `/api/v1`. JSON UTF-8. `Authorization: Bearer <access_token>` en rutas pro
 | GET `/alertas/:id/sos`                            | Administrador                       | Ubicaciones paginadas                                                                                       |
 | POST `/alertas/reportes`                          | Instructor asignado / administrador | `{id_alerta,id_ficha,observaciones?,estudiantes:[{id_usuarios,presente}]}`                                  |
 | GET `/alertas/:id/reportes`                       | Instructor / administrador          | Reportes propios; administrador ve todos                                                                    |
-| GET `/roles`, `/fichas`, `/jornadas`, `/horarios` | Sesión                              | Catálogos paginados                                                                                         |
+| GET `/alarmas`                                    | Sesión                              | Alarmas vigentes, rojas primero; `?semaforo=rojo\|amarillo`; `meta.conteo`. Celador/admin ven también QR    |
+| POST `/alarmas/qr`                                | Celador / administrador             | `{motivo:QR_VENCIDO\|QR_INVALIDO,contenido,tipo?}`: QR rechazado en el lector; 201, o 200 si se repite      |
+| PATCH `/alarmas/qr/:id/atender`                   | Celador / administrador             | Marca la alarma QR como revisada                                                                           |
+| GET `/riesgos/configuracion`                      | Administrador                       | Sede, radio, magnitud mínima, monitor y reglas del semáforo                                                 |
+| POST `/riesgos/evaluar`                           | Administrador                       | `{magnitud,latitud,longitud}` → distancia, severidad, semáforo y si genera alarma; no guarda nada           |
+| POST `/riesgos/simular`                           | Administrador                       | Igual más `lugar?`,`notificar?`: simulacro de punta a punta; crea la alerta si es rojo o amarillo           |
+| GET `/riesgos/sismos`                             | Administrador                       | Últimos sismos recibidos con su semáforo (incluye verdes sin alerta)                                        |
+| GET `/roles`, `/jornadas`                         | Sesión                              | Catálogos paginados                                                                                         |
+| GET `/fichas`                                     | Sesión                              | Administrador: todas. Instructor: asignadas o donde dicta. Aprendiz: las suyas. `meta.alcance`              |
+| GET `/horarios`                                   | Sesión                              | Calendario personal: administrador ve todo; instructor solo sus clases; aprendiz las de su ficha            |
 | GET `/programas`                                  | Sesión                              | Catálogo paginado. Administrador puede filtrar `activo=true/false`; otros roles ven sólo activos            |
 | GET `/programas/:id`, `/programas/instructores`   | Administrador                       | Detalle anidado y lista de instructores activos                                                             |
 | POST `/programas`, PATCH `/programas/:id`         | Administrador                       | Guarda programa, fichas y horarios en una transacción. PATCH también admite `{activo}`                      |
 | GET `/reportes/accesos`, `/reportes/horarios`     | Administrador                       | Lotes completos con `limit`, `despues`, `hasta`. Accesos requiere `fecha=AAAA-MM-DD` (Bogotá)               |
 | GET `/asistencias`                                | Sesión                              | Propias; administrador ve todas                                                                             |
 | GET `/asistencias/fichas`                         | Instructor/admin                    | Fichas visibles: asignadas al instructor; administrador ve todas                                            |
-| GET `/asistencias/lista`                          | Instructor/admin                    | Aprendices de sus fichas y estado del día (`id_ficha`, `fecha`): Presente, Retraso o Sin registro           |
+| GET `/asistencias/lista`                          | Instructor/admin                    | Aprendices de sus fichas y estado del día (`id_ficha`, `fecha`): Presente, Retardo, Ausente o Sin registro  |
+| GET `/asistencias/periodo`                        | Instructor/admin                    | Frecuencia por aprendiz: `presentes`, `retardos`, `ausentes`, `sin_registro`, asistencia y puntualidad      |
+| PUT `/asistencias/estado`                         | Instructor/admin                    | `{id_usuarios,id_ficha,fecha,estado}` con `Presente`, `Retardo`, `Ausente` o `Sin registro`                 |
 | PUT `/fichas/{id}/jornada`                        | Administrador                       | `{nombre,hora_inicio,hora_fin}`: define la jornada vigente; la asistencia anterior no cambia                |
 | GET `/eventos`                                    | Sesión                              | SSE; `Last-Event-ID` o `?after=cursor`                                                                      |
 | WS `/tiempo-real`                                 | Sesión (mensaje `auth`)             | WebSocket (WSS en producción) con el mismo cursor y filtros que SSE                                         |
 
-El editor de programas admite horarios con día, hora de inicio, hora de fin, entorno e instructor, agrupados dentro de sus fichas. Desactivar conserva las relaciones históricas. Las exportaciones devuelven `meta.hasta` como límite fijo, y `meta.siguiente` es nulo al finalizar. Swagger está disponible en `/docs` y el contrato generado en `/openapi.json`.
+El editor de programas admite horarios con día, hora de inicio, hora de fin, entorno e instructor, agrupados dentro de sus fichas. Desactivar conserva las relaciones históricas. Las exportaciones devuelven `meta.hasta` como límite fijo, y `meta.siguiente` es nulo al finalizar. Swagger está disponible en `/docs` y el contrato generado en `/openapi.json`. La gestión de riesgos y las alarmas se explican, con su guía de pruebas, en [RIESGOS.md](RIESGOS.md); el diagnóstico del correo, en [CORREO.md](CORREO.md).
 
 Ejemplo de login:
 

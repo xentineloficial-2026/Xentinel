@@ -292,7 +292,8 @@ def verificar_correo(config):
             codigo,
         )
     else:
-        LOG.info("Correo listo por %s", transporte(config))
+        # Nivel warning: sin configuración de logging, el registro solo muestra desde él.
+        LOG.warning("Correo listo por %s", transporte(config))
 
 
 def procesar_correo(base, config, enviar=enviar_correo):
