@@ -211,7 +211,8 @@ PLANTILLA_HTML = """<!doctype html>
  font-size:13px;line-height:20px;color:#4a5c6a">{seguridad}</p>
 </td></tr>
 <tr><td style="padding:16px 4px 0;font-family:{fuente};font-size:12px;line-height:18px;color:#4a5c6a">
-Xentinel, gestión y control de acceso del SENA, sede Fontibón.</td></tr>
+Xentinel, gestión y control de acceso del SENA, sede Fontibón.<br>
+<a href="{privacidad}" style="color:#4a5c6a">Política de Privacidad</a></td></tr>
 </table></td></tr></table></body></html>"""
 
 BLOQUE_CODIGO = """<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
@@ -242,6 +243,7 @@ def html_correo(config, *, titulo, indicacion, seguridad, enlace, resumen, codig
         enlace=escape(enlace, quote=True),
         resumen=escape(resumen),
         logo=escape(f"{origen_web(config)}/favicon-xentinel.png", quote=True),
+        privacidad=escape(f"{origen_web(config)}/privacidad", quote=True),
         codigo=bloque,
         fuente=FUENTE,
     )
