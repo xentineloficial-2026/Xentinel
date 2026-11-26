@@ -47,10 +47,9 @@ services:
         value: "500"
       - key: SEISMIC_MIN_MAGNITUDE
         value: "4.0"
-      # Correo opcional: sin él la recuperación de contraseña responde 503. El plan gratis
-      # bloquea los puertos SMTP 25, 465 y 587: allí se usa Gmail API (GMAIL_CLIENT_ID,
-      # GMAIL_CLIENT_SECRET y GMAIL_REFRESH_TOKEN) o un relé con el puerto 2525. Esas
-      # credenciales y FIREBASE_SERVICE_ACCOUNT se escriben en el panel (Environment).
+      # Correo opcional: sin él la recuperación de contraseña responde 503. Se envía con
+      # Brevo (BREVO_API_KEY y el remitente verificado). Las credenciales y
+      # FIREBASE_SERVICE_ACCOUNT se escriben en el panel (Environment).
       - key: SMTP_PORT
         value: "2525"
       - key: SMTP_HOST
@@ -73,13 +72,15 @@ services:
         sync: false
       - key: SMTP_FROM
         sync: false
-      # Gmail API por HTTPS: los valores viven solo en el panel; sync: false evita que
-      # una sincronización del Blueprint los sobrescriba.
-      - key: GMAIL_CLIENT_ID
+      # Brevo: los valores viven solo en el panel; sync: false evita que una
+      # sincronización del Blueprint los sobrescriba.
+      - key: BREVO_API_KEY
         sync: false
-      - key: GMAIL_CLIENT_SECRET
+      - key: BREVO_SENDER_EMAIL
         sync: false
-      - key: GMAIL_REFRESH_TOKEN
+      - key: BREVO_SENDER_NAME
+        value: Xentinel
+      - key: BREVO_SMTP_LOGIN
         sync: false
 
   - type: web

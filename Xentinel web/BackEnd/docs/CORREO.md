@@ -1,58 +1,55 @@
-# Correo de Xentinel: diagnóstico, configuración y pruebas
+# Correo de Xentinel con Brevo: configuración, pruebas y diagnóstico
 
-Xentinel envía dos tipos de código de 6 dígitos desde la cuenta de Gmail de Xentinel:
+Xentinel envía dos tipos de código de 6 dígitos desde el remitente verificado de Xentinel en **Brevo**:
 
 | Flujo | Dónde se pide | Endpoint | Destino del código |
 | --- | --- | --- | --- |
 | Recuperar la contraseña | Web («¿Olvidaste tu contraseña?») y app | `POST /auth/olvide-contrasena` | Correo de la cuenta |
 | Cambiar el correo | Web, **Mi perfil → Cambiar correo** | `POST /auth/correo/solicitar` y `/auth/correo/confirmar` | Correo **nuevo** (prueba que es de la persona) |
 
-Los códigos vencen a los `RESET_TTL_MINUTES` (15), admiten 5 intentos y se piden 3 veces cada 15 minutos. Ambos viajan cifrados en la cola `mail_outbox`; un proceso de la API los entrega cada 2 segundos y reintenta con espera creciente.
+Los códigos vencen a los `RESET_TTL_MINUTES` (15), admiten 5 intentos y se piden 3 veces cada 15 minutos. Viajan cifrados en la cola `mail_outbox`; un proceso de la API los entrega cada 2 segundos y reintenta con espera creciente. El correo es HTML claro con la marca de Xentinel y lleva también una versión en texto.
 
-Con Gmail API, la API cambia el refresh token por un token de acceso de una hora y lo reutiliza hasta un minuto antes de que venza. Si Google rechaza ese token antes de tiempo (HTTP 401), pide uno nuevo y reintenta el envío una vez. Un mensaje solo cuenta como enviado cuando Gmail devuelve su id. El correo sale como `Xentinel <cuenta>` con la cuenta de `SMTP_FROM`.
+## 1. Cómo envía
 
-## 1. Diagnóstico de la falla
+La API elige el camino según la clave de `BREVO_API_KEY`:
 
-**Causa en producción.** Los registros de `xentinel-api` en Render repiten en cada arranque, desde el 17 de noviembre de 2026:
+| Clave | Camino | Qué más necesita |
+| --- | --- | --- |
+| Clave de API (`xkeysib-…`) | API REST: `POST https://api.brevo.com/v3/smtp/email` con la cabecera `api-key`. Brevo responde `201` con un `messageId`. | `BREVO_SENDER_EMAIL` |
+| Clave SMTP (`xsmtpsib-…`) | Relé SMTP `smtp-relay.brevo.com`, puerto **2525** con STARTTLS. Render gratis bloquea los puertos 25, 465 y 587, no el 2525. | `BREVO_SENDER_EMAIL` y `BREVO_SMTP_LOGIN` (el usuario del relé, `…@smtp-brevo.com`) |
 
-```text
-Correo sin configurar: la recuperación de contraseña responde 503
-```
+Un envío solo cuenta como hecho cuando Brevo lo confirma (el `messageId` en la API o la aceptación del relé). Al iniciar, la API comprueba la clave sin gastar envíos del plan (`GET /v3/account` o el inicio de sesión en el relé) y lo deja en el registro. La API quita los espacios, saltos de línea y comillas que se cuelan al pegar las variables en un panel.
 
-En el servicio no hay ninguna credencial de correo (`GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` ni `SMTP_HOST`). Por eso la API respondía 503 antes de generar el código y la cola `mail_outbox` de Supabase está vacía: el código nunca se creó ni se intentó enviar. No es un fallo de Gmail.
+Sin `BREVO_API_KEY`, la API usa el SMTP propio de `SMTP_HOST` (útil en un computador local). Sin ninguno de los dos, la recuperación responde `503 MAIL_NOT_CONFIGURED`.
 
-**Lo que hacía difícil verlo, y se corrigió en el código:**
+## 2. Configurar Brevo en Render
 
-- La API respondía `INTERNAL_ERROR: No se pudo completar la solicitud`. Ahora responde `503 MAIL_NOT_CONFIGURED` con un mensaje claro.
-- Un fallo de entrega solo dejaba `SMTP_DELIVERY_FAILED` en el registro. Ahora queda el código y la causa que informa el proveedor, sin secretos ni destinatarios. Por ejemplo: `GMAIL_AUTH: HTTP 400 invalid_grant: Token has been expired or revoked.`
-- No había forma de probar el envío. Ahora existen `GET /correo/estado`, `POST /correo/prueba` y el comando `python -m xentinel probar-correo`.
-- Con Gmail API y el remitente de ejemplo (`no-reply@example.com`), el mensaje salía con un `From` ajeno. Ahora se omite y Gmail usa la cuenta autorizada.
-- No existía el cambio de correo con código: el correo solo lo cambiaba administración. Ahora cada persona lo cambia desde su perfil.
+1. En Brevo, **Remitentes, dominios e IP dedicadas → Remitentes**: `Xentinel <xentinel.oficial@gmail.com>` debe aparecer verificado.
+2. En **SMTP y API** copia la clave (de API o SMTP) y, si es SMTP, el **usuario** del relé.
+3. En Render, `xentinel-api` → **Environment**:
 
-## 2. Configurar el envío en Render (Gmail API)
+   | Variable | Valor |
+   | --- | --- |
+   | `BREVO_API_KEY` | La clave de Brevo |
+   | `BREVO_SENDER_EMAIL` | `xentinel.oficial@gmail.com` |
+   | `BREVO_SENDER_NAME` | `Xentinel` |
+   | `BREVO_SMTP_LOGIN` | Solo con clave SMTP: el usuario del relé |
 
-El plan gratis de Render bloquea los puertos SMTP, así que se usa Gmail API por HTTPS:
+4. Guarda y despliega. En **Logs** debe aparecer `Correo listo por brevo-api` o `Correo listo por brevo-smtp`. Si aparece `Correo no disponible (…)`, la tabla de la sección 4 dice qué corregir.
 
-1. Con la cuenta de Gmail de Xentinel, en <https://console.cloud.google.com>, crea un proyecto y habilita **Gmail API**.
-2. En **Google Auth Platform → Audience**, publica la app (**In production**). En modo de prueba el permiso vence a los 7 días y aparece `invalid_grant`.
-3. En **Clients**, crea un ID de cliente OAuth de tipo **Aplicación web** con el URI de redirección `https://developers.google.com/oauthplayground`.
-4. En <https://developers.google.com/oauthplayground>, pulsa el engranaje, marca **Use your own OAuth credentials** y pega el ID y el secreto. Autoriza el alcance `https://www.googleapis.com/auth/gmail.send` con la cuenta de Xentinel y pulsa **Exchange authorization code for tokens**. Copia el **Refresh token**.
-5. En Render, `xentinel-api` → **Environment**, agrega `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET` y `GMAIL_REFRESH_TOKEN`. Opcional: `SMTP_FROM` = `Xentinel <cuenta-de-xentinel@gmail.com>`; debe ser la misma cuenta o un alias verificado.
-6. Guarda: Render reinicia el servicio. En **Logs** debe aparecer `Correo listo por gmail`. Si aparece `Correo no disponible (GMAIL_AUTH)`, revisa los pasos 2 a 4.
-
-Los tres valores son secretos: escríbelos solo en el panel de Render, nunca en el repositorio ni en un chat. La API quita los espacios, saltos de línea y comillas que se cuelan al pegarlos.
+Las claves son secretas: van solo en el panel de Render, nunca en el repositorio.
 
 ## 3. Probar el envío
 
 **Desde Swagger** (`https://xentinel-api.onrender.com/docs`, sesión de Administrador):
 
-1. `GET /api/v1/correo/estado` debe mostrar `"configurado": true` y `"transporte": "gmail"`.
+1. `GET /api/v1/correo/estado` muestra `"configurado": true`, el transporte (`brevo-api` o `brevo-smtp`) y el remitente.
 2. `POST /api/v1/correo/prueba` con `{"destino":"tu-correo@ejemplo.com"}`:
-   - `200 {"enviado": true}`: Gmail aceptó el mensaje. Revisa la bandeja y la carpeta de spam.
-   - `502 MAIL_DELIVERY_FAILED`: el mensaje trae la causa (tabla de abajo).
-   - `503 MAIL_NOT_CONFIGURED`: faltan las variables del paso 2.
+   - `200 {"enviado": true}`: Brevo aceptó el mensaje. Revisa la bandeja y la carpeta de spam.
+   - `502 MAIL_DELIVERY_FAILED`: el mensaje trae la causa y qué hacer (tabla de abajo).
+   - `503 MAIL_NOT_CONFIGURED`: faltan las variables de la sección 2.
 
-La colección de Postman [`xentinel-riesgos.postman_collection.json`](xentinel-riesgos.postman_collection.json) trae estas dos peticiones (10 y 11).
+La colección de Postman [`xentinel-riesgos.postman_collection.json`](xentinel-riesgos.postman_collection.json) trae estas dos peticiones (10 y 11). En Brevo, **Transaccional → Registros** muestra cada envío y si llegó.
 
 **Desde una terminal** con el `.env` de la API:
 
@@ -60,27 +57,26 @@ La colección de Postman [`xentinel-riesgos.postman_collection.json`](xentinel-r
 python -m xentinel probar-correo tu-correo@ejemplo.com
 ```
 
-Responde «Correo de prueba enviado…» o «No se envió (CÓDIGO): causa».
-
 **Flujos completos:**
 
 1. Recuperación: en la web, **Iniciar sesión → ¿Olvidaste tu contraseña?**, escribe el correo de una cuenta activa, recibe el código, escríbelo y crea la contraseña nueva. En la app, el mismo flujo desde el login.
 2. Cambio de correo: en la web, **Mi perfil → Cambiar correo**, escribe el correo nuevo y tu contraseña, recibe el código en el correo nuevo y confírmalo. La sesión se cierra y el login confirma «Tu correo ahora es …».
-3. `GET /correo/estado` muestra `enviados_24h` y, si algo falló, `ultimo_fallo`.
 
-**Pruebas automáticas** (`npm test` con `TEST_DATABASE_URL`): «correo por Gmail API: diagnóstico, prueba de envío, causa exacta del fallo y cola entregada» levanta un Gmail simulado y comprueba el envío, el `invalid_grant` y la entrega por la cola. «cambio de correo con código…» cubre la contraseña, el correo repetido, los intentos y el uso único.
+**Pruebas automáticas** (`npm test` con `TEST_DATABASE_URL`):
+
+- «correo por la API de Brevo…» levanta una API de Brevo simulada y comprueba el diagnóstico, el envío, la clave inválida, el remitente sin verificar, la respuesta sin `messageId` y la entrega del código desde la cola.
+- «correo por el relé SMTP de Brevo…» levanta un relé simulado y comprueba el inicio de sesión con el usuario del relé, la clave SMTP y los errores.
 
 ## 4. Códigos de fallo
 
 | Código | Qué significa | Qué hacer |
 | --- | --- | --- |
-| `GMAIL_AUTH` + `invalid_grant` | El refresh token venció, se revocó o se generó con otro cliente (sin marcar «Use your own OAuth credentials» en el Playground) | Publica la app en Google (paso 2) y genera otro refresh token con este mismo cliente (paso 4) |
-| `GMAIL_AUTH` + `access token (ya29…)` | En `GMAIL_REFRESH_TOKEN` se pegó el access token | Copia el **Refresh token** (empieza por `1//`), no el access token |
-| `GMAIL_AUTH` + `invalid_client` / `unauthorized_client` | ID o secreto del cliente incorrectos (`The OAuth client was not found`: el ID no existe) | Copia de nuevo `GMAIL_CLIENT_ID` y `GMAIL_CLIENT_SECRET` desde el JSON del cliente |
-| `GMAIL_SEND` + `Insufficient Permission` | El token no tiene el alcance `gmail.send` | Repite el paso 4 con ese alcance |
-| `GMAIL_SEND` + `Invalid From header` | `SMTP_FROM` no es la cuenta ni un alias verificado | Usa la cuenta de Xentinel o quita `SMTP_FROM` |
-| `GMAIL_SEND` + `Gmail no confirmó el envío` | Google respondió sin el id del mensaje | La cola reintenta sola; si se repite, revisa el estado de Gmail API en Google Cloud |
-| `GMAIL_AUTH` + `sin access_token` | Google respondió al refresh token sin entregar un token de acceso | Genera otro refresh token (paso 4) |
-| `SMTP_AUTH` | Usuario o contraseña SMTP rechazados | Con Gmail, usa una contraseña de aplicación |
-| `TIMEOUT` / `CONNECTION` | No hay salida al servidor de correo | En Render gratis usa Gmail API: los puertos SMTP están bloqueados |
-| `MAIL_NOT_CONFIGURED` (503) | No hay transporte configurado | Paso 2 |
+| `BREVO_AUTH` + `Key not found` | La clave de API no existe o se desactivó | Genera otra clave de API en **SMTP y API** y cámbiala en Render |
+| `BREVO_AUTH` + `unrecognised IP` | Brevo bloquea llamadas desde IP desconocidas | En Brevo, **Seguridad → IP autorizadas**, desactiva el bloqueo (Render cambia de IP) |
+| `BREVO_SEND` + `sender is not valid` | El remitente no está verificado en Brevo | Verifica el remitente o corrige `BREVO_SENDER_EMAIL` |
+| `BREVO_SEND` + `Brevo no confirmó el envío` | Brevo respondió sin `messageId` | La cola reintenta sola; si se repite, revisa el estado de Brevo |
+| `BREVO_CONFIG` | Falta `BREVO_SENDER_EMAIL` o, con clave SMTP, `BREVO_SMTP_LOGIN` | Agrégala en Render |
+| `SMTP_AUTH` | El relé rechazó el usuario o la clave SMTP | Copia de nuevo el usuario (`…@smtp-brevo.com`) y la clave SMTP |
+| `SMTP_SENDER` | El relé rechazó el remitente | Verifica el remitente en Brevo |
+| `TIMEOUT` / `CONNECTION` | No hay salida al servidor de correo | Con el relé, usa el puerto 2525 (`BREVO_SMTP_PORT`) |
+| `MAIL_NOT_CONFIGURED` (503) | No hay transporte configurado | Sección 2 |

@@ -74,8 +74,8 @@ def probar_correo(destino):
     medio = transporte(config)
     if not medio:
         raise SystemExit(
-            "Correo sin configurar: define GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET y "
-            "GMAIL_REFRESH_TOKEN (Gmail API) o SMTP_HOST, SMTP_USER y SMTP_PASS (SMTP)."
+            "Correo sin configurar: define BREVO_API_KEY y BREVO_SENDER_EMAIL (Brevo) "
+            "o SMTP_HOST, SMTP_USER y SMTP_PASS (SMTP)."
         )
     print(f"Enviando por {medio}…")
     try:

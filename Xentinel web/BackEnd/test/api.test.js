@@ -11,6 +11,7 @@ import {
 } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createServer, request as httpRequest } from 'node:http';
+import { createServer as crearServidorTcp } from 'node:net';
 import { promisify } from 'node:util';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -1469,140 +1470,246 @@ test('cambio de correo con código: contraseña, correo nuevo, intentos y uso ú
   assert.equal(usado.status, 400);
   assert.equal((await api('/auth/correo/confirmar', { method: 'POST', body: { codigo: datos.codigo } })).status, 401);
 });
-async function gmailSimulado() {
-  const recibido = { tokens: [], enviados: [] };
-  // Cada renovación entrega un access token distinto; revocar() simula que Google
-  // invalida los ya emitidos antes de que venzan, y sinId una respuesta incompleta.
-  const google = { emitidos: 0, revocados: new Set(), sinId: false };
+/** API REST de Brevo simulada: valida la cabecera api-key y el remitente verificado. */
+async function brevoSimulado() {
+  const recibido = { envios: [], cuentas: 0 };
+  const estado = { sinId: false };
   const servidor = createServer(async (peticion, respuesta) => {
     let texto = '';
     for await (const parte of peticion) texto += parte;
-    const responderJson = (estado, datos) => {
-      respuesta.writeHead(estado, { 'Content-Type': 'application/json' });
+    const responderJson = (codigo, datos) => {
+      respuesta.writeHead(codigo, { 'Content-Type': 'application/json' });
       respuesta.end(JSON.stringify(datos));
     };
-    if (peticion.url === '/token') {
-      const formulario = new URLSearchParams(texto);
-      recibido.tokens.push(formulario.get('grant_type'));
-      // Google no recorta: un token pegado con espacios o comillas es inválido.
-      if (formulario.get('refresh_token') === 'revocado' || /[\s"']/.test(formulario.get('refresh_token')))
-        return responderJson(400, { error: 'invalid_grant', error_description: 'Token has been expired or revoked.' });
-      google.emitidos += 1;
-      return responderJson(200, { access_token: `gmail-simulado-${google.emitidos}`, expires_in: 3600 });
+    if (peticion.headers['api-key'] !== 'xkeysib-prueba')
+      return responderJson(401, { code: 'unauthorized', message: 'Key not found' });
+    if (peticion.method === 'GET' && peticion.url === '/v3/account') {
+      recibido.cuentas += 1;
+      return responderJson(200, { email: 'cuenta@test.example' });
     }
-    const token = (peticion.headers.authorization ?? '').replace(/^Bearer /, '');
-    if (peticion.url === '/gmail/v1/users/me/messages/send' && token.startsWith('gmail-simulado-') && !google.revocados.has(token)) {
-      recibido.enviados.push(Buffer.from(JSON.parse(texto).raw, 'base64url').toString('utf8'));
-      return responderJson(200, google.sinId ? {} : { id: `mensaje-${recibido.enviados.length}` });
+    if (peticion.method === 'POST' && peticion.url === '/v3/smtp/email') {
+      const carga = JSON.parse(texto);
+      if (carga.sender?.email !== 'xentinel@test.example')
+        return responderJson(400, { code: 'invalid_parameter', message: 'sender is not valid' });
+      recibido.envios.push(carga);
+      return responderJson(201, estado.sinId ? {} : { messageId: `<${recibido.envios.length}@relay.test>` });
     }
-    return responderJson(401, { error: { message: 'Request had invalid authentication credentials.' } });
+    return responderJson(404, { code: 'not_found', message: 'Not found' });
   });
   await new Promise((resolver) => servidor.listen(0, '127.0.0.1', resolver));
   return {
     recibido,
-    google,
-    revocar: () => {
-      for (let numero = 1; numero <= google.emitidos; numero += 1) google.revocados.add(`gmail-simulado-${numero}`);
-    },
+    estado,
     url: `http://127.0.0.1:${servidor.address().port}`,
     cerrar: () => new Promise((resolver) => servidor.close(resolver)),
   };
 }
-test('correo por Gmail API: diagnóstico, prueba de envío, causa exacta del fallo y cola entregada', async () => {
+
+/** Relé SMTP de Brevo simulado: AUTH PLAIN con el usuario del relé y la clave xsmtpsib. */
+async function releSmtpSimulado() {
+  const recibido = { accesos: [], mensajes: [] };
+  const sockets = new Set();
+  const servidor = crearServidorTcp((socket) => {
+    sockets.add(socket);
+    let pendiente = '';
+    let enDatos = false;
+    let mensaje = '';
+    const responder = (linea) => socket.write(`${linea}\r\n`);
+    responder('220 relé simulado');
+    socket.on('error', () => {});
+    socket.on('data', (trozo) => {
+      pendiente += trozo.toString('utf8');
+      let corte;
+      while ((corte = pendiente.indexOf('\r\n')) >= 0) {
+        const linea = pendiente.slice(0, corte);
+        pendiente = pendiente.slice(corte + 2);
+        if (enDatos) {
+          if (linea === '.') {
+            enDatos = false;
+            recibido.mensajes.push(mensaje);
+            mensaje = '';
+            responder('250 2.0.0 en cola');
+          } else mensaje += `${linea.startsWith('..') ? linea.slice(1) : linea}\r\n`;
+          continue;
+        }
+        const [orden, ...resto] = linea.split(' ');
+        switch (orden.toUpperCase()) {
+          case 'EHLO':
+            socket.write('250-relay.test\r\n250 AUTH PLAIN LOGIN\r\n');
+            break;
+          case 'AUTH': {
+            const [usuario, clave] = Buffer.from(resto[1] ?? '', 'base64').toString('utf8').split('\0').slice(1);
+            recibido.accesos.push([usuario, clave]);
+            responder(
+              usuario === 'c0001@smtp-brevo.com' && clave === 'xsmtpsib-prueba'
+                ? '235 2.7.0 aceptado'
+                : '535 5.7.8 credenciales inválidas',
+            );
+            break;
+          }
+          case 'DATA':
+            enDatos = true;
+            responder('354 termina con un punto');
+            break;
+          case 'QUIT':
+            responder('221 adiós');
+            socket.end();
+            break;
+          default:
+            responder('250 OK');
+        }
+      }
+    });
+  });
+  await new Promise((resolver) => servidor.listen(0, '127.0.0.1', resolver));
+  return {
+    recibido,
+    puerto: servidor.address().port,
+    cerrar: () =>
+      new Promise((resolver) => {
+        for (const socket of sockets) socket.destroy();
+        servidor.close(resolver);
+      }),
+  };
+}
+
+const probarCorreo = (servidor, token = adminToken, destino = 'destino@test.example') =>
+  fetch(`${servidor}/api/v1/correo/prueba`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ destino }),
+  }).then(async (respuesta) => ({ status: respuesta.status, body: await respuesta.json() }));
+
+test('correo por la API de Brevo: diagnóstico, prueba de envío, causa exacta del fallo y cola entregada', async () => {
   await pool.query('DELETE FROM api_rate_limits');
   // Sin transporte configurado la prueba lo dice con un código propio.
   const sinCorreo = await api('/correo/estado', { token: adminToken });
   assert.deepEqual([sinCorreo.body.data.configurado, sinCorreo.body.data.transporte], [false, null]);
-  const prueba = (servidor, token = adminToken) =>
-    fetch(`${servidor}/api/v1/correo/prueba`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ destino: 'destino@test.example' }),
-    }).then(async (respuesta) => ({ status: respuesta.status, body: await respuesta.json() }));
-  assert.equal((await prueba(base)).body.error.code, 'MAIL_NOT_CONFIGURED');
-  assert.equal((await prueba(base, studentToken)).status, 403);
-  const gmail = await gmailSimulado();
-  const configGmail = {
+  assert.equal((await probarCorreo(base)).body.error.code, 'MAIL_NOT_CONFIGURED');
+  assert.equal((await probarCorreo(base, studentToken)).status, 403);
+  const brevo = await brevoSimulado();
+  const configBrevo = {
     ...config,
-    GMAIL_CLIENT_ID: 'cliente.apps.googleusercontent.com',
-    GMAIL_CLIENT_SECRET: 'secreto-de-prueba',
-    GMAIL_REFRESH_TOKEN: 'refresco-valido',
-    GMAIL_TOKEN_URL: `${gmail.url}/token`,
-    GMAIL_API_URL: gmail.url,
+    // Pegada con comillas, espacios y salto de línea, como suele pasar en un panel.
+    BREVO_API_KEY: ' "xkeysib-prueba"\n',
+    BREVO_SENDER_EMAIL: 'xentinel@test.example',
+    BREVO_API_URL: brevo.url,
   };
-  const conGmail = await iniciarFastApi(configGmail);
-  // Cada instancia corre su propio worker de correo sobre la misma base: solo una con
-  // Gmail válido queda viva mientras se prueba la cola, para que otra no tome el mensaje.
-  let revocado = await iniciarFastApi({ ...configGmail, GMAIL_REFRESH_TOKEN: 'revocado' });
-  let oficial = null;
+  const conBrevo = await iniciarFastApi(configBrevo);
+  // Cada instancia corre su propio worker sobre la misma base: la de clave inválida se
+  // cierra antes de probar la cola para que no tome el mensaje.
+  let invalida = await iniciarFastApi({ ...configBrevo, BREVO_API_KEY: 'xkeysib-revocada' });
+  let otroRemitente = null;
   try {
-    const estado = await fetch(`${conGmail.base}/api/v1/correo/estado`, {
+    // Al iniciar valida la clave con GET /v3/account, sin gastar envíos.
+    assert.ok(brevo.recibido.cuentas >= 1);
+    assert.match(conBrevo.diagnostico(), /Correo listo por brevo-api/);
+    const estado = await fetch(`${conBrevo.base}/api/v1/correo/estado`, {
       headers: { Authorization: `Bearer ${adminToken}` },
     }).then((respuesta) => respuesta.json());
-    assert.equal(estado.data.transporte, 'gmail');
-    assert.equal(estado.data.remitente, 'La cuenta de Gmail autorizada');
-    const enviada = await prueba(conGmail.base);
+    assert.equal(estado.data.transporte, 'brevo-api');
+    assert.equal(estado.data.remitente, 'Xentinel <xentinel@test.example>');
+    const enviada = await probarCorreo(conBrevo.base);
     assert.equal(enviada.status, 200, JSON.stringify(enviada.body));
-    const [mensaje] = gmail.recibido.enviados;
-    assert.match(mensaje, /^To: destino@test\.example$/m);
-    assert.match(mensaje, /^Subject: Prueba de correo de Xentinel$/m);
-    // Con el remitente de ejemplo, Gmail usa la cuenta autorizada: no se envía un From falso.
-    assert.doesNotMatch(mensaje, /^From:/m);
-    const fallida = await prueba(revocado.base);
-    assert.equal(fallida.status, 502);
-    assert.equal(fallida.body.error.code, 'MAIL_DELIVERY_FAILED');
-    assert.match(fallida.body.error.message, /GMAIL_AUTH: HTTP 400 invalid_grant: Token has been expired or revoked/);
-    assert.match(fallida.body.error.message, /Use your own OAuth credentials/);
-    assert.ok(!fallida.body.error.message.includes('secreto-de-prueba'));
-    await revocado.cerrar();
-    revocado = null;
-    // El worker entrega por Gmail API el código pedido desde la recuperación.
+    assert.deepEqual(enviada.body.data, { enviado: true, transporte: 'brevo-api' });
+    const [prueba] = brevo.recibido.envios;
+    assert.deepEqual(prueba.sender, { name: 'Xentinel', email: 'xentinel@test.example' });
+    assert.deepEqual(prueba.to, [{ email: 'destino@test.example' }]);
+    assert.equal(prueba.subject, 'Prueba de correo de Xentinel');
+    assert.match(prueba.htmlContent, /Correo de prueba/);
+    assert.match(prueba.htmlContent, /favicon-xentinel\.png/);
+    assert.match(prueba.textContent, /correo de prueba de Xentinel/);
+
+    const rechazada = await probarCorreo(invalida.base);
+    assert.equal(rechazada.status, 502);
+    assert.equal(rechazada.body.error.code, 'MAIL_DELIVERY_FAILED');
+    assert.match(rechazada.body.error.message, /BREVO_AUTH: HTTP 401 unauthorized: Key not found \(BREVO_API_KEY debe ser/);
+    assert.ok(!rechazada.body.error.message.includes('xkeysib-revocada'));
+    assert.match(invalida.diagnostico(), /Correo no disponible \(BREVO_AUTH\)/);
+    await invalida.cerrar();
+    invalida = null;
+
+    // El worker entrega por Brevo el código pedido desde la recuperación.
     await pool.query('DELETE FROM mail_outbox');
     await pool.query('DELETE FROM password_reset_tokens');
-    const pedido = await fetch(`${conGmail.base}/api/v1/auth/olvide-contrasena`, {
+    const pedido = await fetch(`${conBrevo.base}/api/v1/auth/olvide-contrasena`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ correo: 'admin@test.example' }),
     });
     assert.equal(pedido.status, 202);
     const limite = Date.now() + 15000;
-    while (gmail.recibido.enviados.length < 2) {
-      assert.ok(Date.now() < limite, `el worker no entregó el correo: ${conGmail.diagnostico()}`);
+    while (brevo.recibido.envios.length < 2) {
+      assert.ok(Date.now() < limite, `el worker no entregó el correo: ${conBrevo.diagnostico()}`);
       await new Promise((resolver) => setTimeout(resolver, 200));
     }
-    assert.match(gmail.recibido.enviados[1], /^Subject: [0-9]{6} es tu /m);
+    const codigo = brevo.recibido.envios[1];
+    assert.deepEqual(codigo.to, [{ email: 'admin@test.example' }]);
+    const [, digitos] = codigo.subject.match(/^([0-9]{6}) es tu código de recuperación de Xentinel$/);
+    assert.ok(codigo.htmlContent.includes(`>${digitos}</td>`));
+    assert.match(codigo.htmlContent, new RegExp(`Vence en ${config.RESET_TTL_MINUTES} minutos y solo funciona una vez`));
+    assert.match(codigo.textContent, new RegExp(digitos));
     const cola = (await pool.query('SELECT enviado_en,error_codigo,payload_encrypted FROM mail_outbox')).rows[0];
     assert.ok(cola.enviado_en);
     assert.equal(cola.error_codigo, null);
     assert.equal(cola.payload_encrypted, null);
 
-    // Con SMTP_FROM de la cuenta oficial, el correo sale a nombre de Xentinel.
-    // Valores pegados con espacios, comillas y salto de línea, como suele pasar en un panel.
-    oficial = await iniciarFastApi({
-      ...configGmail,
-      SMTP_FROM: ' "xentinel@test.example" ',
-      GMAIL_REFRESH_TOKEN: ' "refresco-valido"\n',
-    });
-    const desdeOficial = await prueba(oficial.base);
-    assert.equal(desdeOficial.status, 200, JSON.stringify(desdeOficial.body));
-    assert.match(gmail.recibido.enviados.at(-1), /^From: Xentinel <xentinel@test\.example>$/m);
-    // Google revoca el access token guardado antes de vencer: se renueva y se reintenta una vez.
-    const renovaciones = gmail.recibido.tokens.length;
-    const entregados = gmail.recibido.enviados.length;
-    gmail.revocar();
-    const trasRevocar = await prueba(oficial.base);
-    assert.equal(trasRevocar.status, 200, JSON.stringify(trasRevocar.body));
-    assert.equal(gmail.recibido.tokens.length, renovaciones + 1);
-    assert.equal(gmail.recibido.enviados.length, entregados + 1);
-    // Una respuesta 200 sin id no cuenta como enviada.
-    gmail.google.sinId = true;
-    const sinConfirmar = await prueba(oficial.base);
+    // Una respuesta 201 sin messageId no cuenta como enviada.
+    brevo.estado.sinId = true;
+    const sinConfirmar = await probarCorreo(conBrevo.base);
     assert.equal(sinConfirmar.status, 502);
-    assert.match(sinConfirmar.body.error.message, /GMAIL_SEND: Gmail no confirmó el envío/);
+    assert.match(sinConfirmar.body.error.message, /BREVO_SEND: Brevo no confirmó el envío/);
+    brevo.estado.sinId = false;
+
+    // Un remitente que Brevo no tiene verificado se informa con qué corregir.
+    otroRemitente = await iniciarFastApi({ ...configBrevo, BREVO_SENDER_EMAIL: 'otro@test.example' });
+    const sinVerificar = await probarCorreo(otroRemitente.base);
+    assert.equal(sinVerificar.status, 502);
+    assert.match(sinVerificar.body.error.message, /sender is not valid \(BREVO_SENDER_EMAIL debe ser un remitente verificado/);
   } finally {
-    await oficial?.cerrar();
-    await conGmail.cerrar();
-    await revocado?.cerrar();
-    await gmail.cerrar();
+    await otroRemitente?.cerrar();
+    await invalida?.cerrar();
+    await conBrevo.cerrar();
+    await brevo.cerrar();
+  }
+});
+
+test('correo por el relé SMTP de Brevo con una clave xsmtpsib', async () => {
+  await pool.query('DELETE FROM api_rate_limits');
+  const rele = await releSmtpSimulado();
+  const configRele = {
+    ...config,
+    BREVO_API_KEY: 'xsmtpsib-prueba',
+    BREVO_SMTP_LOGIN: 'c0001@smtp-brevo.com',
+    BREVO_SMTP_HOST: '127.0.0.1',
+    BREVO_SMTP_PORT: String(rele.puerto),
+    BREVO_SENDER_EMAIL: 'xentinel@test.example',
+  };
+  const conRele = await iniciarFastApi(configRele);
+  const sinUsuario = await iniciarFastApi({ ...configRele, BREVO_SMTP_LOGIN: '' });
+  const otraClave = await iniciarFastApi({ ...configRele, BREVO_API_KEY: 'xsmtpsib-otra' });
+  try {
+    assert.match(conRele.diagnostico(), /Correo listo por brevo-smtp/);
+    const enviada = await probarCorreo(conRele.base);
+    assert.equal(enviada.status, 200, JSON.stringify(enviada.body));
+    assert.equal(enviada.body.data.transporte, 'brevo-smtp');
+    assert.deepEqual(rele.recibido.accesos.at(-1), ['c0001@smtp-brevo.com', 'xsmtpsib-prueba']);
+    const mensaje = rele.recibido.mensajes.at(-1);
+    assert.match(mensaje, /^From: Xentinel <xentinel@test\.example>$/m);
+    assert.match(mensaje, /^To: destino@test\.example$/m);
+    assert.match(mensaje, /^Subject: Prueba de correo de Xentinel$/m);
+    assert.match(mensaje, /text\/html/);
+
+    const faltaUsuario = await probarCorreo(sinUsuario.base);
+    assert.equal(faltaUsuario.status, 502);
+    assert.match(faltaUsuario.body.error.message, /BREVO_CONFIG: Falta BREVO_SMTP_LOGIN/);
+    const rechazada = await probarCorreo(otraClave.base);
+    assert.equal(rechazada.status, 502);
+    assert.match(rechazada.body.error.message, /SMTP_AUTH: El servidor SMTP rechazó el usuario o la clave \(535\)/);
+  } finally {
+    await otraClave.cerrar();
+    await sinUsuario.cerrar();
+    await conRele.cerrar();
+    await rele.cerrar();
   }
 });
