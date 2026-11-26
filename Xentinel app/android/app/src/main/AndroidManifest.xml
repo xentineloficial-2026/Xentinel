@@ -5,11 +5,10 @@
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
     <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
-    <!-- Alertas sísmicas: notificación (Android 13+), pantalla completa con el teléfono
-         bloqueado y acceso opcional a No molestar para el canal crítico. -->
+    <!-- Alertas sísmicas como notificación de prioridad máxima (Android 13+). Sin
+         pantalla completa sobre el bloqueo ni acceso a No molestar: Play Protect trata
+         esos permisos como propios de apps que se apoderan de la pantalla. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
-    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY"/>
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
 
     <!-- Producción: solo HTTPS/WSS (sin tráfico en claro) y sin copias de seguridad de
@@ -31,8 +30,6 @@
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
-            android:showWhenLocked="true"
-            android:turnScreenOn="true"
             android:windowSoftInputMode="adjustResize">
             <meta-data
                 android:name="io.flutter.embedding.android.NormalTheme"
