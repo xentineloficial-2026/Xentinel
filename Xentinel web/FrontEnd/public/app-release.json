@@ -1,10 +1,10 @@
 {
   "available": true,
   "packageId": "co.edu.sena.xentinel",
-  "version": "1.3.0",
-  "versionCode": 6,
-  "sizeBytes": 26456022,
-  "sha256": "7243a1a715215b898e1922025ff3fe6c3bd26aefac59dc3c970e35176578bb5c",
-  "url": "/downloads/xentinel-1.3.0-6.apk",
-  "releasedAt": "2026-11-24T15:11:43.583476+00:00"
+  "version": "1.3.1",
+  "versionCode": 7,
+  "sizeBytes": 26491969,
+  "sha256": "dce647df43593a9ddf9502d5217f6b496889637f3fd622b1dafad6997e3f62b6",
+  "url": "/downloads/xentinel-1.3.1-7.apk",
+  "releasedAt": "2026-11-26T02:54:40.926821+00:00"
 }

@@ -42,13 +42,16 @@ class Configuracion(BaseModel):
     SMTP_USER: str = ""
     SMTP_PASS: str = Field(default="", repr=False)
     SMTP_FROM: str = "Xentinel <no-reply@example.com>"
-    # Gmail API por HTTPS (alternativa a SMTP donde los puertos SMTP están bloqueados,
-    # como el plan gratis de Render). Con las tres variables definidas reemplaza a SMTP.
-    GMAIL_CLIENT_ID: str = ""
-    GMAIL_CLIENT_SECRET: str = Field(default="", repr=False)
-    GMAIL_REFRESH_TOKEN: str = Field(default="", repr=False)
-    GMAIL_TOKEN_URL: str = "https://oauth2.googleapis.com/token"
-    GMAIL_API_URL: str = "https://gmail.googleapis.com"
+    # Brevo: con BREVO_API_KEY definido reemplaza a SMTP. Una clave de API (xkeysib-)
+    # envía por la API REST (HTTPS); una clave SMTP (xsmtpsib-) envía por el relé de
+    # Brevo en el puerto 2525, que Render gratis no bloquea, con el usuario del relé.
+    BREVO_API_KEY: str = Field(default="", repr=False)
+    BREVO_SENDER_EMAIL: str = ""
+    BREVO_SENDER_NAME: str = "Xentinel"
+    BREVO_SMTP_LOGIN: str = ""
+    BREVO_SMTP_HOST: str = "smtp-relay.brevo.com"
+    BREVO_SMTP_PORT: int = Field(default=2525, ge=1, le=65535)
+    BREVO_API_URL: str = "https://api.brevo.com"
     # Carnet QR rotativo firmado (XN2). Sin valor se deriva de JWT_SECRET con separación
     # de dominio; defínalo para rotar las credenciales QR sin cerrar las sesiones.
     QR_SECRET: str = Field(default="", repr=False)
@@ -91,12 +94,15 @@ class Configuracion(BaseModel):
         ]
 
     @property
-    def gmail(self):
-        return bool(self.GMAIL_REFRESH_TOKEN)
+    def brevo(self):
+        """``"api"`` (REST), ``"smtp"`` (relé) o ``None`` según la clave de Brevo."""
+        if not self.BREVO_API_KEY:
+            return None
+        return "smtp" if self.BREVO_API_KEY.startswith("xsmtpsib-") else "api"
 
     @property
     def correo_configurado(self):
-        return bool(self.SMTP_HOST or self.gmail)
+        return bool(self.SMTP_HOST or self.brevo)
 
     @property
     def cuenta_firebase(self):
@@ -107,9 +113,10 @@ class Configuracion(BaseModel):
         )
 
     @field_validator(
-        "GMAIL_CLIENT_ID",
-        "GMAIL_CLIENT_SECRET",
-        "GMAIL_REFRESH_TOKEN",
+        "BREVO_API_KEY",
+        "BREVO_SENDER_EMAIL",
+        "BREVO_SENDER_NAME",
+        "BREVO_SMTP_LOGIN",
         "SMTP_FROM",
         mode="before",
     )
@@ -136,15 +143,6 @@ class Configuracion(BaseModel):
             for o in self.origenes
         ):
             raise ValueError("WEB_ORIGINS debe contener orígenes explícitos sin rutas")
-        gmail = (
-            self.GMAIL_CLIENT_ID,
-            self.GMAIL_CLIENT_SECRET,
-            self.GMAIL_REFRESH_TOKEN,
-        )
-        if any(gmail) and not all(gmail):
-            raise ValueError(
-                "Gmail API requiere GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET y GMAIL_REFRESH_TOKEN"
-            )
         if self.FIREBASE_SERVICE_ACCOUNT:
             try:
                 cuenta = json.loads(self.FIREBASE_SERVICE_ACCOUNT)

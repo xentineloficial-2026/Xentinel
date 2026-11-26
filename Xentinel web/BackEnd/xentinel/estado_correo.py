@@ -1,5 +1,5 @@
 """Diagnóstico del correo para administración: qué transporte usa, cómo va la cola y una
-prueba de envío que devuelve la causa exacta de un fallo (p. ej. ``invalid_grant``)."""
+prueba de envío que devuelve la causa exacta de un fallo (p. ej. ``Key not found``)."""
 
 from fastapi import APIRouter, Request
 from starlette.concurrency import run_in_threadpool
@@ -21,8 +21,8 @@ def correo_no_configurado():
     return ErrorAPI(
         503,
         "MAIL_NOT_CONFIGURED",
-        "El envío de correos no está configurado en el servidor. Define GMAIL_CLIENT_ID, "
-        "GMAIL_CLIENT_SECRET y GMAIL_REFRESH_TOKEN (o SMTP_HOST) y reinicia la API.",
+        "El envío de correos no está configurado en el servidor. Define BREVO_API_KEY "
+        "y BREVO_SENDER_EMAIL (o SMTP_HOST) y reinicia la API.",
     )
 
 
@@ -41,7 +41,7 @@ def estado(db: Base, solicitud: Request, sesion: Administrador):
         {
             "configurado": config.correo_configurado,
             "transporte": correo.transporte(config),
-            "remitente": correo.remitente(config) or "La cuenta de Gmail autorizada",
+            "remitente": correo.remitente(config),
             "cola": cola,
             "ultimo_fallo": correo.ULTIMO_FALLO or None,
         }

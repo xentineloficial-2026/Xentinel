@@ -1,7 +1,7 @@
 # Entrega del 19 de noviembre de 2026 — v1.2.0 (5)
 
-- **Recuperación con código:** la contraseña se restablece con un código de 6 dígitos enviado desde el Gmail de Xentinel (Gmail API o contraseña de aplicación por SMTP). Vence a los 15 minutos, admite 5 intentos y se guarda cifrado con HMAC en el servidor. El correo es HTML de tema oscuro con versión en texto.
-- **Alertas sísmicas:** el backend escucha EMSC por WebSocket y consulta USGS como respaldo, filtra por distancia a la sede y magnitud, y deduplica entre agencias. Crea la alerta de emergencia que la web y la app muestran al instante, y la envía por Firebase Cloud Messaging al tema `alertas_sismo`. En Android: canal `canal_sismos_critico` con importancia máxima, sirena propia, categoría de alarma (pasa No molestar), acceso opcional a No molestar y pantalla completa con el teléfono bloqueado.
+- **Recuperación con código:** la contraseña se restablece con un código de 6 dígitos enviado por Brevo desde el remitente verificado de Xentinel. Vence a los 15 minutos, admite 5 intentos y se guarda cifrado con HMAC en el servidor. El correo es HTML claro con la marca de Xentinel y versión en texto.
+- **Alertas sísmicas:** el backend escucha EMSC por WebSocket y consulta USGS como respaldo, filtra por distancia a la sede y magnitud, y deduplica entre agencias. Crea la alerta de emergencia que la web y la app muestran al instante, y la envía por Firebase Cloud Messaging al tema `alertas_sismo`. En Android: canal `canal_sismos_critico` con importancia máxima, sirena propia y categoría de alarma (pasa el modo No molestar habitual).
 - Firebase es opcional: sin `google-services.json` la app compila y funciona igual, sin notificaciones push.
 
 ---
@@ -17,6 +17,7 @@ Producción en la nube, sin IP locales ni puertos, y lectura QR de celular a cel
 - **Icono y apertura (1.3.0):** logo oficial (la X) como icono adaptable, monocromo y de iOS; arranque nativo en tinta con la X y animación de apertura que continúa desde ella. `dart run flutter_launcher_icons` regenera los iconos, pero cambia por error `ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS` en `ios/Runner.xcodeproj/project.pbxproj`: revierte ese archivo después de ejecutarlo.
 - **Inicio y alarmas (1.3.0):** sin barra inferior redundante; acción principal por rol; alarmas con semáforo (rojo y amarillo) que incluyen carnets QR vencidos o no verídicos para el personal de control.
 - **Escáner (1.3.0):** «Acceso Permitido. ¡Bienvenido!» (verde) y «Salida Registrada. ¡Hasta pronto!» (azul), con sonido y vibración propios.
+- **Firma y permisos (1.3.1):** firma única del proyecto (CN=Xentinel) con esquemas v1, v2 y v3, fijada en los scripts de publicación; sin permisos de pantalla completa sobre el bloqueo ni de No molestar, que Play Protect asocia a apps que se apoderan de la pantalla.
 - **QR:** carnet `XN2` firmado (HMAC‑SHA256, verificado y revocable en el servidor), alfanumérico versión 3 con corrección Q, hasta 320 dp y brillo máximo. Escáner a 1280×720 con zoom automático, enfoque al tocar, zoom manual, preferencia por códigos Xentinel y antirrebote por persona. El lector web acepta el carnet de la app.
 - **Producción:** Android sin tráfico en claro ni copias de seguridad de datos de la app, código ofuscado y una sola APK arm64.
 - **Backend:** módulo `credenciales.py`, WebSocket `/api/v1/tiempo-real`, `codigo_qr` y `escaneado_en` en `POST /ingresos`, migración `004_rls_correo_opcional`, SMTP opcional en producción y pool configurable (`DB_POOL_MAX`).

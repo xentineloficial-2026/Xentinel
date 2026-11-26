@@ -1,4 +1,8 @@
-"""Cola de correo cifrada con reintentos coordinados en PostgreSQL (SMTP o Gmail API)."""
+"""Cola de correo cifrada con reintentos coordinados en PostgreSQL (Brevo o SMTP).
+
+Brevo envía por su API REST con una clave de API (``xkeysib-``) o por su relé SMTP en el
+puerto 2525 con una clave SMTP (``xsmtpsib-``). Sin Brevo se usa el SMTP de ``SMTP_HOST``.
+"""
 
 import asyncio
 import json
@@ -6,19 +10,20 @@ import logging
 import os
 import smtplib
 import ssl
-from base64 import b64decode, b64encode, urlsafe_b64encode
+from base64 import b64decode, b64encode
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from email.message import EmailMessage
 from email.utils import formataddr, parseaddr
 from html import escape
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from starlette.concurrency import run_in_threadpool
 
-from .google import TOKEN_GMAIL, pedir_json, token_gmail
+from .google import pedir_json
 
 LOG = logging.getLogger(__name__)
 # Último fallo de entrega en este proceso, para el diagnóstico de administración.
@@ -35,20 +40,35 @@ class FalloCorreo(OSError):
         self.detalle = detalle
 
 
+# Qué hacer ante las respuestas más comunes de la API de Brevo.
+PISTAS_BREVO = (
+    (
+        "unrecognised IP",
+        "en Brevo, Seguridad > IP autorizadas, desactiva el bloqueo de IP",
+    ),
+    ("Key not found", "BREVO_API_KEY debe ser una clave de API activa (xkeysib-)"),
+    (
+        "API Key is not enabled",
+        "BREVO_API_KEY debe ser una clave de API activa (xkeysib-)",
+    ),
+    ("sender", "BREVO_SENDER_EMAIL debe ser un remitente verificado en Brevo"),
+)
+
+
 def causa_http(error):
-    """Causa legible de una respuesta de Google, p. ej. «invalid_grant: Token has been expired»."""
+    """Causa legible de una respuesta de Brevo, p. ej. «HTTP 401 unauthorized: Key not found»."""
     try:
         cuerpo = json.loads(error.read().decode("utf-8", "replace") or "{}")
     except (OSError, ValueError):
         cuerpo = {}
-    falla = cuerpo.get("error")
-    if isinstance(falla, dict):
-        texto = falla.get("message") or falla.get("status") or ""
-    else:
-        texto = ": ".join(
-            parte for parte in (falla, cuerpo.get("error_description")) if parte
-        )
-    return f"HTTP {error.code} {texto}".strip()[:300]
+    if not isinstance(cuerpo, dict):
+        cuerpo = {}
+    texto = ": ".join(
+        str(parte) for parte in (cuerpo.get("code"), cuerpo.get("message")) if parte
+    )
+    causa = f"HTTP {error.code} {texto}".strip()
+    pista = next((p for clave, p in PISTAS_BREVO if clave.lower() in causa.lower()), "")
+    return (f"{causa} ({pista})" if pista else causa)[:300]
 
 
 def clasificar_fallo(error):
@@ -57,8 +77,13 @@ def clasificar_fallo(error):
         return error.codigo, error.detalle
     if isinstance(error, smtplib.SMTPAuthenticationError):
         return "SMTP_AUTH", (
-            f"El servidor SMTP rechazó el usuario o la contraseña ({error.smtp_code}). "
-            "Con Gmail se necesita una contraseña de aplicación."
+            f"El servidor SMTP rechazó el usuario o la clave ({error.smtp_code}). Con "
+            "Brevo, BREVO_SMTP_LOGIN es el usuario del relé (…@smtp-brevo.com) y "
+            "BREVO_API_KEY la clave SMTP."
+        )
+    if isinstance(error, smtplib.SMTPSenderRefused):
+        return "SMTP_SENDER", (
+            "El servidor SMTP rechazó el remitente: en Brevo debe estar verificado."
         )
     if isinstance(error, smtplib.SMTPRecipientsRefused):
         return "SMTP_RECIPIENT", "El servidor SMTP rechazó el destinatario."
@@ -67,7 +92,7 @@ def clasificar_fallo(error):
     if isinstance(error, TimeoutError):
         return "TIMEOUT", (
             "El servidor de correo no respondió a tiempo. En Render gratis los puertos "
-            "SMTP están bloqueados: usa Gmail API."
+            "25, 465 y 587 están bloqueados: el relé de Brevo usa el 2525."
         )
     if isinstance(error, (ConnectionError, URLError)):
         return (
@@ -109,54 +134,117 @@ def descifrar_correo(valor, config):
     )
 
 
+def servidor_smtp(config):
+    """``(host, puerto, segura, usuario, clave)``: el relé de Brevo o el SMTP propio."""
+    if config.brevo == "smtp":
+        if not config.BREVO_SMTP_LOGIN:
+            raise FalloCorreo(
+                "BREVO_CONFIG",
+                "Falta BREVO_SMTP_LOGIN, el usuario del relé SMTP de Brevo "
+                "(…@smtp-brevo.com).",
+            )
+        return (
+            config.BREVO_SMTP_HOST,
+            config.BREVO_SMTP_PORT,
+            "false",
+            config.BREVO_SMTP_LOGIN,
+            config.BREVO_API_KEY,
+        )
+    return (
+        config.SMTP_HOST,
+        config.SMTP_PORT,
+        config.SMTP_SECURE,
+        config.SMTP_USER,
+        config.SMTP_PASS,
+    )
+
+
 @contextmanager
 def conectar_smtp(config):
+    host, puerto, segura, usuario, clave = servidor_smtp(config)
     tls = ssl.create_default_context()
     conexion = (
-        smtplib.SMTP_SSL(config.SMTP_HOST, config.SMTP_PORT, timeout=5, context=tls)
-        if config.SMTP_SECURE == "true"
-        else smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT, timeout=5)
+        smtplib.SMTP_SSL(host, puerto, timeout=10, context=tls)
+        if segura == "true"
+        else smtplib.SMTP(host, puerto, timeout=10)
     )
     with conexion:
         conexion.ehlo_or_helo_if_needed()
-        if config.SMTP_SECURE == "false" and (
+        # En producción la conexión siempre se cifra con STARTTLS antes de autenticar.
+        if segura == "false" and (
             config.NODE_ENV == "production" or conexion.has_extn("starttls")
         ):
             conexion.starttls(context=tls)
             conexion.ehlo()
-        if config.SMTP_USER:
-            conexion.login(config.SMTP_USER, config.SMTP_PASS)
+        if usuario:
+            conexion.login(usuario, clave)
         yield conexion
 
 
+# Plantilla clara con la paleta de Xentinel: se lee igual en webmail, Outlook y el celular.
+FUENTE = "Arial,Helvetica,sans-serif"
 PLANTILLA_HTML = """<!doctype html>
-<html lang="es"><head><meta charset="utf-8"><meta name="color-scheme" content="dark">
-<title>{titulo} · Xentinel</title></head>
-<body style="margin:0;padding:0;background:#06141b;color:#edf0ef;font-family:Arial,Helvetica,sans-serif">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#06141b">
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light"><meta name="supported-color-schemes" content="light">
+<title>{titulo}</title></head>
+<body style="margin:0;padding:0;background:#eef1f0;-webkit-text-size-adjust:100%">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">{resumen}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#eef1f0">
 <tr><td align="center" style="padding:32px 16px">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0"
- style="max-width:520px;background:#0d1d27;border:1px solid #1a2e3b;border-radius:16px">
-<tr><td style="padding:32px 32px 8px">
-<p style="margin:0;font-size:13px;letter-spacing:3px;color:#9ba8ab">XENTINEL · SENA</p>
-<h1 style="margin:16px 0 8px;font-size:24px;color:#edf0ef">{titulo}</h1>
-<p style="margin:0;font-size:15px;line-height:22px;color:#9ba8ab">
-{indicacion}</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px">
+<tr><td style="padding:0 4px 16px">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+<td style="padding-right:10px"><img src="{logo}" width="32" height="32" alt=""
+ style="display:block;border:0;border-radius:8px"></td>
+<td style="font-family:{fuente};font-size:18px;font-weight:bold;color:#06141b">Xentinel</td>
+</tr></table></td></tr>
+<tr><td style="background:#ffffff;border:1px solid #ccd0cf;border-radius:16px;padding:32px">
+<h1 style="margin:0 0 8px;font-family:{fuente};font-size:22px;line-height:28px;color:#06141b">{titulo}</h1>
+<p style="margin:0;font-family:{fuente};font-size:15px;line-height:22px;color:#4a5c6a">{indicacion}</p>
+{codigo}
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0 0">
+<tr><td style="background:#11212d;border-radius:10px">
+<a href="{enlace}" style="display:inline-block;padding:12px 22px;font-family:{fuente};font-size:15px;
+ font-weight:bold;color:#f2f4f3;text-decoration:none">Abrir Xentinel</a></td></tr></table>
+<p style="margin:28px 0 0;padding-top:20px;border-top:1px solid #e2e6e5;font-family:{fuente};
+ font-size:13px;line-height:20px;color:#4a5c6a">{seguridad}</p>
 </td></tr>
-<tr><td style="padding:24px 32px" align="center">
-<div style="display:inline-block;padding:16px 24px;border:1px solid #4a5c6a;border-radius:12px;
- background:#06141b;font-family:'Courier New',monospace;font-size:36px;font-weight:bold;
- letter-spacing:10px;color:#edf0ef">{codigo}</div>
-<p style="margin:16px 0 0;font-size:14px;color:#9ba8ab">Vence en {minutos} minutos y solo funciona una vez.</p>
-</td></tr>
-<tr><td style="padding:0 32px 24px" align="center">
-<a href="{enlace}" style="display:inline-block;padding:12px 20px;border-radius:10px;background:#edf0ef;
- color:#06141b;font-size:15px;font-weight:bold;text-decoration:none">Abrir Xentinel</a>
-</td></tr>
-<tr><td style="padding:16px 32px 32px;border-top:1px solid #1a2e3b">
-<p style="margin:0;font-size:13px;line-height:20px;color:#9ba8ab">
-Si no lo solicitaste, ignora este correo: {sin_cambios} Nadie de Xentinel te pedirá este código.</p>
-</td></tr></table></td></tr></table></body></html>"""
+<tr><td style="padding:16px 4px 0;font-family:{fuente};font-size:12px;line-height:18px;color:#4a5c6a">
+Xentinel, gestión y control de acceso del SENA, sede Fontibón.</td></tr>
+</table></td></tr></table></body></html>"""
+
+BLOQUE_CODIGO = """<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+ style="margin:24px 0 8px"><tr><td align="center" style="background:#eef1f0;border-radius:12px;
+ padding:20px 12px;font-family:'Courier New',Courier,monospace;font-size:34px;line-height:40px;
+ font-weight:bold;letter-spacing:10px;color:#06141b">{codigo}</td></tr></table>
+<p style="margin:0;font-family:{fuente};font-size:13px;line-height:20px;color:#4a5c6a;text-align:center">
+Vence en {minutos} minutos y solo funciona una vez.</p>"""
+
+
+def origen_web(config):
+    partes = urlsplit(config.RESET_PASSWORD_URL)
+    return f"{partes.scheme}://{partes.netloc}"
+
+
+def html_correo(config, *, titulo, indicacion, seguridad, enlace, resumen, codigo=None):
+    bloque = (
+        BLOQUE_CODIGO.format(
+            codigo=escape(codigo), minutos=config.RESET_TTL_MINUTES, fuente=FUENTE
+        )
+        if codigo
+        else ""
+    )
+    return PLANTILLA_HTML.format(
+        titulo=escape(titulo),
+        indicacion=escape(indicacion),
+        seguridad=escape(seguridad),
+        enlace=escape(enlace, quote=True),
+        resumen=escape(resumen),
+        logo=escape(f"{origen_web(config)}/favicon-xentinel.png", quote=True),
+        codigo=bloque,
+        fuente=FUENTE,
+    )
 
 
 # tipo de código: (asunto, título, indicación, qué no cambia si se ignora)
@@ -177,12 +265,16 @@ TEXTOS = {
 
 
 def remitente(config):
-    """``From`` del correo: «Xentinel <cuenta>» con la cuenta de ``SMTP_FROM``.
+    """``From`` del correo, p. ej. «Xentinel <cuenta>», o ``None`` si no hay uno real.
 
-    Con Gmail API, un remitente de ejemplo se omite y Gmail usa la cuenta autorizada.
+    Con Brevo es el remitente verificado (``BREVO_SENDER_EMAIL``); si falta, se toma la
+    dirección de ``SMTP_FROM``. Una dirección de ejemplo nunca se usa como remitente.
     """
     nombre, direccion = parseaddr(config.SMTP_FROM)
-    if not direccion or (config.gmail and direccion.lower().endswith("@example.com")):
+    if config.brevo:
+        nombre = config.BREVO_SENDER_NAME or nombre
+        direccion = config.BREVO_SENDER_EMAIL or direccion
+    if not direccion or direccion.lower().endswith("@example.com"):
         return None
     return formataddr((nombre or "Xentinel", direccion))
 
@@ -190,6 +282,10 @@ def remitente(config):
 def mensaje_codigo(datos, config):
     """Correo con un código de 6 dígitos: recuperación de contraseña o cambio de correo."""
     asunto, titulo, indicacion, sin_cambios = TEXTOS[datos.get("tipo", "recuperacion")]
+    seguridad = (
+        f"Si no lo pediste, ignora este correo: {sin_cambios} "
+        "Nadie de Xentinel te pedirá este código."
+    )
     mensaje = EmailMessage()
     if remitente(config):
         mensaje["From"] = remitente(config)
@@ -199,18 +295,18 @@ def mensaje_codigo(datos, config):
         f"{titulo}:\n\n"
         f"    {datos['codigo']}\n\n"
         f"Vence en {config.RESET_TTL_MINUTES} minutos y solo funciona una vez. "
-        f"{indicacion} {datos['link']}\n\n"
-        f"Si no lo solicitaste, ignora este correo: {sin_cambios} "
-        "Nadie de Xentinel te pedirá este código.\n\nXentinel · SENA"
+        f"{indicacion} {datos['link']}\n\n{seguridad}\n\nXentinel · SENA"
     )
     mensaje.add_alternative(
-        PLANTILLA_HTML.format(
-            titulo=escape(titulo),
-            indicacion=escape(indicacion),
-            sin_cambios=escape(sin_cambios),
-            codigo=escape(datos["codigo"]),
-            minutos=config.RESET_TTL_MINUTES,
-            enlace=escape(datos["link"], quote=True),
+        html_correo(
+            config,
+            titulo=titulo,
+            indicacion=indicacion,
+            seguridad=seguridad,
+            enlace=datos["link"],
+            resumen=f"Tu código es {datos['codigo']}. Vence en "
+            f"{config.RESET_TTL_MINUTES} minutos.",
+            codigo=datos["codigo"],
         ),
         subtype="html",
     )
@@ -222,87 +318,90 @@ mensaje_recuperacion = mensaje_codigo
 
 
 def mensaje_prueba(destino, config):
+    indicacion = (
+        "Si lo recibiste, Xentinel ya puede enviar los códigos de recuperación de "
+        "contraseña y de cambio de correo."
+    )
     mensaje = EmailMessage()
     if remitente(config):
         mensaje["From"] = remitente(config)
     mensaje["To"] = destino
     mensaje["Subject"] = "Prueba de correo de Xentinel"
-    mensaje.set_content(
-        "Este es un correo de prueba de Xentinel.\n\n"
-        "Si lo recibiste, el servidor ya puede enviar los códigos de recuperación de "
-        "contraseña y de cambio de correo.\n\nXentinel · SENA"
+    mensaje.set_content(f"Este es un correo de prueba de Xentinel.\n\n{indicacion}")
+    mensaje.add_alternative(
+        html_correo(
+            config,
+            titulo="Correo de prueba",
+            indicacion=indicacion,
+            seguridad="Lo envió administración desde el diagnóstico de correo.",
+            enlace=origen_web(config),
+            resumen="El correo de Xentinel funciona.",
+        ),
+        subtype="html",
     )
     return mensaje
 
 
-PISTAS_GMAIL = {
-    "invalid_grant": (
-        "el refresh token no sirve con este cliente: genéralo otra vez en OAuth "
-        "Playground marcando «Use your own OAuth credentials» con este mismo cliente "
-        "y el alcance gmail.send"
-    ),
-    "invalid_client": (
-        "GMAIL_CLIENT_ID o GMAIL_CLIENT_SECRET no corresponden a un cliente OAuth: "
-        "cópialos de nuevo desde Google Cloud"
-    ),
-}
-
-
-def acceso_gmail(config):
-    """Access token de Gmail, renovado con el refresh token cuando hace falta."""
-    if config.GMAIL_REFRESH_TOKEN.startswith("ya29."):
+def carga_brevo(mensaje, config):
+    """Cuerpo de ``POST /v3/smtp/email`` a partir del mensaje ya armado."""
+    nombre, correo = parseaddr(remitente(config) or "")
+    if not correo:
         raise FalloCorreo(
-            "GMAIL_AUTH",
-            "GMAIL_REFRESH_TOKEN tiene un access token (ya29…): usa el refresh "
-            "token (empieza por 1//)",
+            "BREVO_CONFIG",
+            "Falta BREVO_SENDER_EMAIL, el remitente verificado en Brevo.",
         )
+    carga = {
+        "sender": {"name": nombre or "Xentinel", "email": correo},
+        "to": [{"email": parseaddr(mensaje["To"])[1]}],
+        "subject": str(mensaje["Subject"]),
+    }
+    for clave, tipo in (("textContent", "plain"), ("htmlContent", "html")):
+        parte = mensaje.get_body(preferencelist=(tipo,))
+        if parte is not None and parte.get_content_type() == f"text/{tipo}":
+            carga[clave] = parte.get_content()
+    return carga
+
+
+def llamar_brevo(config, ruta, cuerpo=None):
+    """Llama a la API de Brevo con la cabecera ``api-key``. Los errores son ``FalloCorreo``."""
     try:
-        return token_gmail(config)
+        return pedir_json(
+            f"{config.BREVO_API_URL.rstrip('/')}{ruta}",
+            cuerpo=cuerpo,
+            cabeceras={"api-key": config.BREVO_API_KEY, "accept": "application/json"},
+        )
     except HTTPError as error:
-        # invalid_grant: el refresh token venció, se revocó o es de otro cliente.
-        causa = causa_http(error)
-        pista = next((p for clave, p in PISTAS_GMAIL.items() if clave in causa), "")
+        codigo = "BREVO_AUTH" if error.code in (401, 403) else "BREVO_SEND"
+        raise FalloCorreo(codigo, causa_http(error)) from None
+    except ValueError:
+        raise FalloCorreo("BREVO_SEND", "Brevo respondió algo que no es JSON") from None
+
+
+def enviar_brevo(mensaje, config):
+    """Envía por la API REST de Brevo y devuelve el ``messageId`` que confirma (201)."""
+    respuesta = llamar_brevo(config, "/v3/smtp/email", carga_brevo(mensaje, config))
+    if not isinstance(respuesta, dict) or not respuesta.get("messageId"):
         raise FalloCorreo(
-            "GMAIL_AUTH", f"{causa} ({pista})" if pista else causa
-        ) from None
-    except ValueError as error:
-        raise FalloCorreo("GMAIL_AUTH", str(error)) from None
-
-
-def enviar_gmail(mensaje, config):
-    """Envía por Gmail API y devuelve el id del mensaje que confirma Google."""
-    cuerpo = {"raw": urlsafe_b64encode(mensaje.as_bytes()).decode()}
-    url = f"{config.GMAIL_API_URL.rstrip('/')}/gmail/v1/users/me/messages/send"
-    for intento in (1, 2):
-        try:
-            respuesta = pedir_json(url, cuerpo=cuerpo, token=acceso_gmail(config))
-        except HTTPError as error:
-            # Un 401 con un token guardado significa que Google lo revocó antes de
-            # vencer: se pide uno nuevo con el refresh token y se reintenta una vez.
-            if error.code == 401 and intento == 1:
-                TOKEN_GMAIL.invalidar()
-                continue
-            raise FalloCorreo("GMAIL_SEND", causa_http(error)) from None
-        except ValueError:
-            raise FalloCorreo(
-                "GMAIL_SEND", "Gmail respondió algo que no es JSON"
-            ) from None
-        if not isinstance(respuesta, dict) or not respuesta.get("id"):
-            raise FalloCorreo(
-                "GMAIL_SEND", "Gmail no confirmó el envío: respuesta sin id"
-            )
-        return respuesta["id"]
-    raise AssertionError("inalcanzable")
+            "BREVO_SEND", "Brevo no confirmó el envío: respuesta sin messageId"
+        )
+    return respuesta["messageId"]
 
 
 def transporte(config):
-    return "gmail" if config.gmail else "smtp" if config.SMTP_HOST else None
+    if config.brevo:
+        return f"brevo-{config.brevo}"
+    return "smtp" if config.SMTP_HOST else None
 
 
 def entregar(mensaje, config):
-    if config.gmail:
-        enviar_gmail(mensaje, config)
+    if config.brevo == "api":
+        enviar_brevo(mensaje, config)
         return
+    if config.brevo and not remitente(config):
+        raise FalloCorreo(
+            "BREVO_CONFIG",
+            "Falta BREVO_SENDER_EMAIL, el remitente verificado en Brevo.",
+        )
     with conectar_smtp(config) as smtp:
         smtp.send_message(mensaje)
 
@@ -323,13 +422,19 @@ def enviar_prueba(destino, config):
 
 
 def verificar_correo(config):
-    """Comprueba el transporte al iniciar; un fallo no tumba la API (la cola reintenta)."""
+    """Comprueba el transporte al iniciar sin enviar nada; un fallo no tumba la API."""
     try:
-        if config.gmail:
-            acceso_gmail(config)
+        if config.brevo == "api":
+            # Valida la clave sin gastar envíos del plan.
+            llamar_brevo(config, "/v3/account")
         else:
             with conectar_smtp(config):
                 pass
+        if config.brevo and not remitente(config):
+            raise FalloCorreo(
+                "BREVO_CONFIG",
+                "Falta BREVO_SENDER_EMAIL, el remitente verificado en Brevo.",
+            )
     except (OSError, KeyError, ValueError) as error:
         codigo = anotar_fallo(error)
         LOG.error(

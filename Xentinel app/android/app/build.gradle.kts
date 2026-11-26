@@ -42,11 +42,17 @@ android {
     }
 
     signingConfigs {
+        // Siempre la misma clave del proyecto (CN=Xentinel): scripts/build-release.sh
+        // rechaza el APK si el certificado no coincide con la huella fijada allí.
         if (signingFile.exists()) create("production") {
             storeFile = rootProject.file(signingProperties.getProperty("storeFile"))
             storePassword = signingProperties.getProperty("storePassword")
             keyAlias = signingProperties.getProperty("keyAlias")
             keyPassword = signingProperties.getProperty("keyPassword")
+            // Esquemas estándar: v1 (JAR) para instaladores antiguos, v2 y v3 (rotación).
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
         }
     }
 

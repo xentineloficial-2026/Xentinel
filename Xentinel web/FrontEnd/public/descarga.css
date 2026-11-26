@@ -393,32 +393,6 @@ details p {
   font-size: 12px;
   overflow-wrap: anywhere;
 }
-.aviso {
-  display: flex;
-  gap: 12px;
-  margin-top: 20px;
-  padding: 14px 16px;
-  border-radius: var(--xn-radio-m);
-  background: var(--xn-aviso-suave);
-  color: var(--xn-texto);
-  font-size: 14px;
-  line-height: 1.5;
-}
-.aviso svg {
-  width: 19px;
-  height: 19px;
-  flex-shrink: 0;
-  margin-top: 1px;
-  color: var(--xn-aviso);
-}
-.aviso p {
-  color: var(--xn-tenue);
-}
-.aviso strong {
-  color: var(--xn-texto);
-  font-weight: 600;
-}
-
 /* Dos teléfonos con capturas reales de la app 1.3.0. */
 .telefonos {
   position: relative;

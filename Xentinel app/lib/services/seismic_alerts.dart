@@ -114,24 +114,19 @@ class SeismicAlerts {
   }
 
   /// Canal de sonido y categoría de alarma: pasa el modo No molestar habitual
-  /// (alarmas permitidas). Con acceso a No molestar se usa un canal que lo ignora;
-  /// Android solo respeta esa opción si el permiso existe al crear el canal.
-  static Future<AndroidNotificationChannel> _channel() async {
-    final dnd = await _android?.hasNotificationPolicyAccess() ?? false;
-    return AndroidNotificationChannel(
-      dnd ? '${channelId}_dnd' : channelId,
-      'Alertas sísmicas',
-      description:
-          'Sismos cercanos a la sede, a pantalla completa y con sirena.',
-      importance: Importance.max,
-      bypassDnd: dnd,
-      sound: const RawResourceAndroidNotificationSound('alerta_sismo'),
-      vibrationPattern: Int64List.fromList([0, 600, 200, 600, 200, 600]),
-      enableLights: true,
-      ledColor: const Color(0xFFC4231A),
-      audioAttributesUsage: AudioAttributesUsage.alarm,
-    );
-  }
+  /// (alarmas permitidas) sin pedir acceso especial al sistema.
+  static Future<AndroidNotificationChannel> _channel() async =>
+      AndroidNotificationChannel(
+        channelId,
+        'Alertas sísmicas',
+        description: 'Sismos cercanos a la sede, con sirena.',
+        importance: Importance.max,
+        sound: const RawResourceAndroidNotificationSound('alerta_sismo'),
+        vibrationPattern: Int64List.fromList([0, 600, 200, 600, 200, 600]),
+        enableLights: true,
+        ledColor: const Color(0xFFC4231A),
+        audioAttributesUsage: AudioAttributesUsage.alarm,
+      );
 
   static Future<void> _prepare({
     DidReceiveNotificationResponseCallback? onTap,
@@ -162,7 +157,6 @@ class SeismicAlerts {
           importance: Importance.max,
           priority: Priority.max,
           category: AndroidNotificationCategory.alarm,
-          fullScreenIntent: true,
           visibility: NotificationVisibility.public,
           sound: channel.sound,
           vibrationPattern: channel.vibrationPattern,
@@ -207,20 +201,6 @@ class SeismicAlerts {
       // Sin red: Firebase reintenta en el próximo inicio de la app.
     }
   }
-
-  static Future<bool> hasDndAccess() async =>
-      await _android?.hasNotificationPolicyAccess() ?? false;
-
-  /// Abre el ajuste de No molestar y crea el canal que lo ignora si se concedió.
-  static Future<bool> requestDndAccess() async {
-    await _android?.requestNotificationPolicyAccess();
-    final granted = await hasDndAccess();
-    if (granted) await _android?.createNotificationChannel(await _channel());
-    return granted;
-  }
-
-  static Future<bool> requestFullScreen() async =>
-      await _android?.requestFullScreenIntentPermission() ?? false;
 
   void dispose() => _foreground?.cancel();
 }

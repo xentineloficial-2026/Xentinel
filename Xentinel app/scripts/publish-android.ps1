@@ -27,13 +27,30 @@ try {
   & $Flutter build apk --release --split-per-abi --target-platform android-arm64 -P force-version-code-ignoring-abi=true --obfuscate --split-debug-info=build/symbols "--dart-define-from-file=$configuration"
   if ($LASTEXITCODE -ne 0) { throw 'Falló la compilación release.' }
   $apk = Join-Path $project 'build/app/outputs/flutter-apk/app-arm64-v8a-release.apk'
+  # Gradle omite la firma v1 cuando minSdk >= 24: apksigner firma de nuevo con la misma
+  # clave del proyecto y los esquemas v1, v2 y v3.
+  $firma = @{}
+  Get-Content -LiteralPath (Join-Path $project 'android/key.properties') | ForEach-Object {
+    if ($_ -match '^([^=]+)=(.*)$') { $firma[$Matches[1]] = $Matches[2] }
+  }
+  $almacen = if ([IO.Path]::IsPathRooted($firma.storeFile)) { $firma.storeFile } else { Join-Path $project "android/$($firma.storeFile)" }
+  $env:XN_CLAVE_ALMACEN = $firma.storePassword
+  $env:XN_CLAVE_LLAVE = $firma.keyPassword
+  try {
+    & (Join-Path $buildTools.FullName 'apksigner.bat') sign --ks $almacen --ks-key-alias $firma.keyAlias --ks-pass env:XN_CLAVE_ALMACEN --key-pass env:XN_CLAVE_LLAVE --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true $apk
+    if ($LASTEXITCODE -ne 0) { throw 'No se pudo firmar el APK con la clave del proyecto.' }
+  } finally {
+    Remove-Item Env:XN_CLAVE_ALMACEN, Env:XN_CLAVE_LLAVE -ErrorAction SilentlyContinue
+  }
   $badging = (& (Join-Path $buildTools.FullName 'aapt.exe') dump badging $apk) -join "`n"
   if ($LASTEXITCODE -ne 0 -or $badging -match 'application-debuggable') { throw 'APK inválido o depurable.' }
   if ($badging -notmatch "package: name='co.edu.sena.xentinel' versionCode='(\d+)' versionName='(\d+\.\d+\.\d+)'") { throw 'El APK no coincide con Xentinel o su versión no es válida.' }
   $versionCode = [int]$Matches[1]
   $versionName = $Matches[2]
-  $certificate = (& (Join-Path $buildTools.FullName 'apksigner.bat') verify --print-certs $apk) -join "`n"
-  if ($LASTEXITCODE -ne 0 -or $certificate -match 'CN=Android Debug') { throw 'El APK requiere una firma válida de producción.' }
+  # Siempre la clave del proyecto (CN=Xentinel): así Android instala cada versión como actualización.
+  $certificate = (& (Join-Path $buildTools.FullName 'apksigner.bat') verify --verbose --print-certs --min-sdk-version 23 $apk) -join "`n"
+  if ($LASTEXITCODE -ne 0 -or $certificate -notmatch 'Signer #1 certificate SHA-256 digest: 9ec23372e0afd1e7ee6843db7713a1a2cc8d18a16d8806c2ff8f83f373b5ef06') { throw 'El APK no está firmado con la clave del proyecto (CN=Xentinel): revisa android/key.properties.' }
+  foreach ($esquema in 'v1', 'v2', 'v3') { if ($certificate -notmatch "Verified using $esquema scheme[^:]*: true") { throw "Falta la firma $esquema." } }
   $downloads = Join-Path $destination 'downloads'
   New-Item -ItemType Directory -Path $downloads -Force | Out-Null
   $fileName = "xentinel-$versionName-$versionCode.apk"
