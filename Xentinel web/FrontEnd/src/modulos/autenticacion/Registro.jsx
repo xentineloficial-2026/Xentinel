@@ -169,6 +169,17 @@ function Registro() {
               alCambiar={(evento) => cambiarConfirmacion(evento.target.value)}
             />
             <MensajeEstado error={error} />
+            <p className="xn-acceso-legal">
+              Al crear tu cuenta aceptas las{' '}
+              <Enlace className="xn-texto-enlace" to="/terminos">
+                Condiciones del Servicio
+              </Enlace>{' '}
+              y la{' '}
+              <Enlace className="xn-texto-enlace" to="/privacidad">
+                Política de Privacidad
+              </Enlace>
+              .
+            </p>
             <button className="xn-boton" disabled={guardando}>
               {guardando ? 'Creando tu cuenta…' : 'Crear mi cuenta'}
             </button>
