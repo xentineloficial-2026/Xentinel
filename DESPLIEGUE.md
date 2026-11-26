@@ -7,7 +7,7 @@ La app, la web y el backend viven en internet, en direcciones `https://` fijas. 
 | Backend `xentinel-api` | Render | <https://xentinel-api.onrender.com> | Se duerme tras 15 minutos sin uso y tarda cerca de un minuto en despertar |
 | Web `xentinel-web` | Render, sitio estático | <https://xentinel-web.onrender.com> | Las actualizaciones se publican al hacer push |
 | Base de datos | Supabase (PostgreSQL 17) | Proyecto `btecqrdsbbrejtltlzto`, us-east-1 | 500 MB; el proyecto se pausa tras una semana sin actividad |
-| Correo (opcional) | Gmail de Xentinel | Gmail API o SMTP | Unos 500 correos al día |
+| Correo (opcional) | Brevo | API REST o relé SMTP (puerto 2525) | 300 correos al día |
 
 **Este plan sirve para probar y mostrar el proyecto. Antes de atender emergencias reales, pasa el backend a un plan de pago que no se duerma.** No uses servicios que hagan pings para mantenerlo despierto: agotarían las horas gratis de Render.
 
@@ -44,28 +44,16 @@ pg_restore --no-owner --no-acl --clean --if-exists --dbname="DATABASE_URL_DE_REN
 
 Usa el mismo `DATABASE_URL` del backend, para que las tablas sigan siendo de `xentinel_api`. `pg_restore` puede mostrar avisos sobre extensiones o el esquema `public`. Después, en Render, abre `xentinel-api` y elige **Manual Deploy > Restart service**: al arrancar se aplican las migraciones que falten.
 
-## 3. Correo con Gmail (recuperación y cambio de correo)
+## 3. Correo con Brevo (recuperación y cambio de correo)
 
-La recuperación de contraseña y el cambio de correo envían un **código de 6 dígitos** que vence a los 15 minutos, admite 5 intentos y se puede pedir 3 veces cada 15 minutos. Se usa la cuenta de Gmail oficial de Xentinel. Sin correo configurado, la API funciona igual y esos flujos responden `503 MAIL_NOT_CONFIGURED`. Gmail permite unos 500 envíos al día desde una cuenta personal.
+La recuperación de contraseña y el cambio de correo envían un **código de 6 dígitos** que vence a los 15 minutos, admite 5 intentos y se puede pedir 3 veces cada 15 minutos. Sale desde el remitente verificado de Xentinel en **Brevo** (plan gratis: 300 correos al día). Sin correo configurado, la API funciona igual y esos flujos responden `503 MAIL_NOT_CONFIGURED`.
 
-> **Estado al 24 de noviembre de 2026:** los registros de `xentinel-api` dicen «Correo sin configurar» en cada arranque: en Render no hay credenciales de correo y por eso no llegaba ningún código. Sigue la opción A y comprueba el envío como indica [`docs/CORREO.md`](Xentinel%20web/BackEnd/docs/CORREO.md), que también explica cada código de fallo.
-
-**Opción A: Gmail API (funciona en el plan gratis de Render).** Render gratis bloquea los puertos SMTP, así que el envío va por HTTPS:
-
-1. Con la cuenta de Gmail de Xentinel, entra a <https://console.cloud.google.com>, crea un proyecto y habilita **Gmail API**.
-2. En **Google Auth Platform > Branding/Audience**, configura la pantalla de consentimiento como **Externa**, y en **Audience** cambia el estado a **In production**. En modo de prueba el permiso vence cada 7 días. Google mostrará un aviso de app no verificada al autorizar: es normal para uso propio.
-3. En **Clients**, crea un **ID de cliente OAuth** de tipo **Aplicación web** con el URI de redirección `https://developers.google.com/oauthplayground`.
-4. Abre <https://developers.google.com/oauthplayground>, pulsa el engranaje, marca **Use your own OAuth credentials** y pega el ID y el secreto del cliente. En el paso 1 escribe el alcance `https://www.googleapis.com/auth/gmail.send`, autoriza con la cuenta de Xentinel y en el paso 2 pulsa **Exchange authorization code for tokens**. Copia el **Refresh token**.
-5. En Render, `xentinel-api` > **Environment**: `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` y, opcional, `SMTP_FROM` (`Xentinel <correo-de-xentinel@gmail.com>`; sin él, Gmail usa la cuenta autorizada).
-6. Al reiniciar, el registro dice `Correo listo por gmail`. Prueba el envío en `/docs` con `POST /api/v1/correo/prueba` (sesión de administrador): si falla, la respuesta trae la causa exacta, por ejemplo `invalid_grant`.
-
-**Opción B: contraseña de aplicación por SMTP (en tu PC o en un plan de pago de Render).**
-
-1. En <https://myaccount.google.com/security> activa la **verificación en 2 pasos** de la cuenta de Xentinel.
-2. En <https://myaccount.google.com/apppasswords> crea una contraseña de aplicación llamada `Xentinel` y copia los 16 caracteres.
-3. Variables: `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=465`, `SMTP_SECURE=true`, `SMTP_USER` (el correo), `SMTP_PASS` (la contraseña de aplicación) y `SMTP_FROM`.
-
-Si están las dos, se usa Gmail API.
+1. En Brevo, **Remitentes y dominios**, el remitente `xentinel.oficial@gmail.com` debe estar verificado.
+2. En **SMTP y API** elige una de las dos claves:
+   - **Clave de API** (`xkeysib-…`): envía por la API REST (`POST https://api.brevo.com/v3/smtp/email`).
+   - **Clave SMTP** (`xsmtpsib-…`): envía por el relé `smtp-relay.brevo.com` en el puerto 2525, que Render gratis no bloquea. Necesita también el **usuario del relé** (`…@smtp-brevo.com`) que aparece en esa misma página.
+3. En Render, `xentinel-api` > **Environment**: `BREVO_API_KEY`, `BREVO_SENDER_EMAIL` (`xentinel.oficial@gmail.com`), `BREVO_SENDER_NAME` (`Xentinel`) y, con clave SMTP, `BREVO_SMTP_LOGIN`.
+4. Al reiniciar, el registro dice `Correo listo por brevo-api` o `Correo listo por brevo-smtp`. Prueba el envío en `/docs` con `POST /api/v1/correo/prueba` (sesión de administrador): si falla, la respuesta trae la causa exacta y qué corregir. Más detalle en [`docs/CORREO.md`](Xentinel%20web/BackEnd/docs/CORREO.md).
 
 ## 4. Alertas sísmicas
 
@@ -91,7 +79,7 @@ Los dos servicios se crean desde `render.yaml` (**New > Blueprint**, repositorio
 | `JWT_SECRET`, `MAIL_ENCRYPTION_KEY`, `QR_SECRET` | Secretos aleatorios propios de producción; no reutilices los de tu `.env` |
 | `WEB_ORIGINS` | `https://xentinel-web.onrender.com` |
 | `RESET_PASSWORD_URL` | `https://xentinel-web.onrender.com/restablecer-contrasena` |
-| `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | Vacíos hasta configurar Gmail (sección 3) |
+| `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME`, `BREVO_SMTP_LOGIN` | Los de Brevo (sección 3) |
 | `VITE_API_URL` | `https://xentinel-api.onrender.com` (sin `/api/v1`) |
 
 Comprueba que `https://xentinel-api.onrender.com/ready` responda `{"status":"ready"}`. La primera vez puede tardar cerca de un minuto.

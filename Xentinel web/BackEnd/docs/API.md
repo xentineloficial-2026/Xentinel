@@ -20,7 +20,7 @@ Base: `/api/v1`. JSON UTF-8. `Authorization: Bearer <access_token>` en rutas pro
 | POST `/auth/restablecer-contrasena`               | Público, limitado                   | `{correo,codigo,contrasena}`; revalidación y consumo atómico; 400 `INVALID_RESET_CODE`                      |
 | POST `/auth/correo/solicitar`                     | Sesión, 3 cada 15 min               | `{correo,contrasena}`; 202 y código de 6 dígitos al correo nuevo; 409 `SAME_EMAIL`/`EMAIL_IN_USE`           |
 | POST `/auth/correo/confirmar`                     | Sesión                              | `{codigo}`; cambia el correo (5 intentos, uso único) y revoca las sesiones; 400 `INVALID_RESET_CODE`        |
-| GET `/correo/estado`                              | Administrador                       | Transporte (`gmail`/`smtp`/`null`), remitente, cola de 24 h y último fallo con su causa                     |
+| GET `/correo/estado`                              | Administrador                       | Transporte (`brevo-api`/`brevo-smtp`/`smtp`/`null`), remitente, cola de 24 h y último fallo con su causa                     |
 | POST `/correo/prueba`                             | Administrador, 5 cada 15 min        | `{destino}`; envía ya un correo de prueba; 502 `MAIL_DELIVERY_FAILED` con la causa, 503 sin correo          |
 | GET `/usuarios`                                   | Administrador                       | Filtros `id_rol` y `estado=Activo/Inactivo`. Con `estado` devuelve ambos conteos en `meta.totales`          |
 | POST `/usuarios`                                  | Administrador                       | Datos de registro más `id_rol`                                                                              |

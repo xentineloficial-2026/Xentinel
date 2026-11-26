@@ -520,7 +520,7 @@
             "prueba"
           ]
         },
-        "description": "200 si el proveedor lo aceptó; 502 con la causa exacta (p. ej. GMAIL_AUTH: HTTP 400 invalid_grant); 503 si falta configurarlo.",
+        "description": "200 si el proveedor lo aceptó; 502 con la causa exacta (p. ej. BREVO_AUTH: HTTP 401 unauthorized: Key not found); 503 si falta configurarlo.",
         "auth": {
           "type": "bearer",
           "bearer": [

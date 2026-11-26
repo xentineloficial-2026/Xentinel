@@ -1,4 +1,4 @@
-"""Llamadas HTTPS a Google (Gmail API y Firebase Cloud Messaging) sin SDK adicionales."""
+"""Llamadas HTTPS sin SDK adicionales: Firebase Cloud Messaging, USGS y Brevo."""
 
 import json
 import threading
@@ -57,30 +57,8 @@ class TokenTemporal:
             self.huella = huella
             return self.valor
 
-    def invalidar(self):
-        """Descarta el token guardado: Google lo rechazó aunque aún no vencía."""
-        with self.candado:
-            self.valor = None
-            self.vence = 0.0
 
-
-TOKEN_GMAIL = TokenTemporal()
 TOKEN_FIREBASE = TokenTemporal()
-
-
-def token_gmail(config):
-    return TOKEN_GMAIL.obtener(
-        (config.GMAIL_CLIENT_ID, config.GMAIL_REFRESH_TOKEN),
-        lambda: pedir_json(
-            config.GMAIL_TOKEN_URL,
-            formulario={
-                "client_id": config.GMAIL_CLIENT_ID,
-                "client_secret": config.GMAIL_CLIENT_SECRET,
-                "refresh_token": config.GMAIL_REFRESH_TOKEN,
-                "grant_type": "refresh_token",
-            },
-        ),
-    )
 
 
 def token_firebase(cuenta):
