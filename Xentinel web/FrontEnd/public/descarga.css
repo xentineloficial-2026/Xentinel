@@ -564,6 +564,13 @@ details p {
   width: 22px;
   height: 24px;
 }
+.pie-legal {
+  color: var(--xn-tenue);
+  transition: color 0.16s;
+}
+.pie-legal:hover {
+  color: var(--xn-texto);
+}
 .pie-enlace {
   margin-left: auto;
   color: var(--xn-texto);

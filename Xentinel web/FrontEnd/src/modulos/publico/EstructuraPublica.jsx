@@ -112,6 +112,8 @@ function EstructuraPublica() {
       '/plataforma': 'Plataforma',
       '/contacto': 'Contáctanos',
       '/servicios': 'Para empresas',
+      '/privacidad': 'Política de Privacidad',
+      '/terminos': 'Condiciones del Servicio',
       '/registro': 'Crear cuenta',
       '/login': 'Iniciar sesión',
       '/recuperar-contrasena': 'Recuperar contraseña',
@@ -149,6 +151,8 @@ function EstructuraPublica() {
             © {new Date().getFullYear()} Xentinel. Gestión y control de acceso.
           </span>
           <span>Un proyecto de talento ADSO · SENA</span>
+          <Enlace to="/privacidad">Política de Privacidad</Enlace>
+          <Enlace to="/terminos">Condiciones del Servicio</Enlace>
           <Enlace to="/servicios">
             Soluciones para organizaciones <FlechaDiagonal size={13} />
           </Enlace>

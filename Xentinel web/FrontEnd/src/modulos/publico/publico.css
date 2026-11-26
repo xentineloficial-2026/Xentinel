@@ -342,6 +342,66 @@ button.xn-texto-enlace {
   margin: 20px 0 32px !important;
   max-width: 60ch;
 }
+/* Páginas legales: lectura cómoda, una sola columna. */
+.xn-legal-vigencia {
+  margin-top: -16px !important;
+  color: var(--xn-tenue);
+  font-size: 14px;
+}
+.xn-legal-texto {
+  max-width: 72ch;
+  margin-top: 40px;
+}
+.xn-legal-texto section + section {
+  margin-top: 36px;
+}
+.xn-sitio .xn-legal-texto h2 {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  margin-bottom: 10px;
+}
+.xn-sitio .xn-legal-texto p,
+.xn-legal-texto li {
+  color: var(--xn-tenue);
+  font-size: 16px;
+  line-height: 1.65;
+}
+.xn-sitio .xn-legal-texto p + p {
+  margin-top: 12px;
+}
+.xn-legal-texto ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+.xn-sitio .xn-legal-texto ul + p {
+  margin-top: 12px;
+}
+.xn-legal-texto li + li {
+  margin-top: 8px;
+}
+.xn-legal-texto strong {
+  color: var(--xn-texto);
+  font-weight: 600;
+}
+.xn-sitio .xn-legal-otro {
+  max-width: 72ch;
+  margin-top: 48px;
+  padding-top: 24px;
+  border-top: 1px solid var(--xn-borde);
+  color: var(--xn-tenue);
+}
+.xn-sitio .xn-acceso-legal {
+  margin: 4px 0 14px;
+  color: var(--xn-tenue);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.xn-sitio .xn-acceso-legal a.xn-texto-enlace {
+  display: inline;
+  min-height: 0;
+  font-size: 13px;
+}
 .xn-modulo-cuadricula {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

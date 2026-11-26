@@ -13,6 +13,10 @@ import { Bienvenida } from '../modulos/publico/Inicio.jsx';
 import { Plataforma } from '../modulos/publico/Plataforma.jsx';
 import { Contactos } from '../modulos/publico/Contactos.jsx';
 import { Servicios } from '../modulos/publico/Servicios.jsx';
+import {
+  CondicionesServicio,
+  PoliticaPrivacidad,
+} from '../modulos/publico/Legal.jsx';
 import { InicioSesion } from '../modulos/autenticacion/InicioSesion.jsx';
 import { Registro } from '../modulos/autenticacion/Registro.jsx';
 import {
@@ -52,6 +56,8 @@ export function RutasAplicacion() {
           <Ruta path="plataforma" element={<Plataforma />} />
           <Ruta path="contacto" element={<Contactos />} />
           <Ruta path="servicios" element={<Servicios />} />
+          <Ruta path="privacidad" element={<PoliticaPrivacidad />} />
+          <Ruta path="terminos" element={<CondicionesServicio />} />
           <Ruta path="login" element={<InicioSesion />} />
           <Ruta path="registro" element={<Registro />} />
           <Ruta path="recuperar-contrasena" element={<RecuperarContrasena />} />
