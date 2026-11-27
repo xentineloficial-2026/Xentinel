@@ -108,7 +108,7 @@ test('migraciones repetibles y esquema esperado', async () => {
   // El migrador anterior verifica que FastAPI conserva los checksums existentes.
   await migrate(pool);
   await migrarFastApi(config.DATABASE_URL);
-  assert.equal((await pool.query('SELECT count(*)::int n FROM schema_migrations')).rows[0].n, 7);
+  assert.equal((await pool.query('SELECT count(*)::int n FROM schema_migrations')).rows[0].n, 8);
   const result = await pool.query(
     "SELECT column_name FROM information_schema.columns WHERE table_name='password_reset_tokens'",
   );
@@ -1712,4 +1712,346 @@ test('correo por el relé SMTP de Brevo con una clave xsmtpsib', async () => {
     await conRele.cerrar();
     await rele.cerrar();
   }
+});
+
+test('asistencia por QR para usuarios recién creados de cualquier rol, con motivo al negar', async () => {
+  await pool.query('DELETE FROM api_rate_limits');
+  const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
+  const { rows: roles } = await pool.query('SELECT id_rol,nombre_rol FROM rol');
+  const rol = (nombre) => roles.find((fila) => fila.nombre_rol === nombre).id_rol;
+  const escanear = (codigo_qr, tipo = 'ENTRADA') =>
+    api('/ingresos', {
+      method: 'POST',
+      token: guardToken,
+      body: { codigo_qr, tipo, metodo: 'QR', request_id: randomUUID() },
+    });
+  for (const [documento, nombre] of [
+    ['70001', 'Aprendiz'],
+    ['70002', 'Instructor'],
+    ['70003', 'Funcionarios'],
+  ]) {
+    const creado = await api('/usuarios', {
+      method: 'POST',
+      token: adminToken,
+      body: {
+        nombres_completos: `Nuevo ${nombre}`,
+        tipo_documento: 'CC',
+        numero_documento: documento,
+        correo: `nuevo${documento}@test.example`,
+        contrasena: password,
+        id_rol: rol(nombre),
+      },
+    });
+    assert.equal(creado.status, 201, JSON.stringify(creado.body));
+    const id = creado.body.data.id_usuarios;
+    const sesion = await api('/auth/login', { method: 'POST', body: { documento, contrasena: password } });
+    const credencial = await api('/auth/credencial-qr', { token: sesion.body.data.access_token });
+    const clave = Buffer.from(credencial.body.data.clave, 'base64url');
+    const entrada = await escanear(codigoXn2(clave, id, pasoActual()));
+    assert.equal(entrada.status, 201, JSON.stringify(entrada.body));
+    assert.equal(entrada.body.data.estado, 'Permitido');
+    assert.equal(entrada.body.data.asistencia.estado, 'Presente');
+    assert.equal(entrada.body.data.asistencia.id_jornada, null);
+    assert.equal(entrada.body.data.persona.nombre_rol, nombre);
+    const salida = await escanear(codigoXn2(clave, id, pasoActual()), 'SALIDA');
+    assert.equal(salida.status, 201, JSON.stringify(salida.body));
+    assert.ok(salida.body.data.asistencia.hora_salida);
+    const {
+      rows: [guardada],
+    } = await pool.query('SELECT estado,hora_entrada,hora_salida FROM asistencia WHERE id_usuarios=$1 AND fecha=$2', [
+      id,
+      hoy,
+    ]);
+    assert.equal(guardada.estado, 'Presente');
+    assert.ok(guardada.hora_entrada && guardada.hora_salida);
+  }
+  // Inactivo: el movimiento queda denegado y el lector sabe por qué.
+  const {
+    rows: [inactivo],
+  } = await pool.query(
+    `INSERT INTO usuarios(nombres_completos,tipo_documento,numero_documento,contrasena,id_rol,estado)
+    VALUES('Cuenta Inactiva','CC','70009','x',$1,'Inactivo') RETURNING id_usuarios`,
+    [rol('Aprendiz')],
+  );
+  const negado = await api('/ingresos', {
+    method: 'POST',
+    token: guardToken,
+    body: { id_usuarios: inactivo.id_usuarios, tipo: 'ENTRADA', metodo: 'Manual', request_id: randomUUID() },
+  });
+  assert.equal(negado.status, 201);
+  assert.equal(negado.body.data.estado, 'Denegado');
+  assert.equal(negado.body.data.motivo.codigo, 'USUARIO_INACTIVO');
+  assert.equal(negado.body.data.asistencia, null);
+  const ausente = await api('/ingresos', {
+    method: 'POST',
+    token: guardToken,
+    body: { id_usuarios: 2147483000, tipo: 'ENTRADA', metodo: 'Manual', request_id: randomUUID() },
+  });
+  assert.equal(ausente.status, 404);
+  assert.equal(ausente.body.error.message, 'Usuario no encontrado');
+  // Una entrada olvidada de ayer no bloquea la entrada de hoy.
+  const {
+    rows: [olvido],
+  } = await pool.query(
+    `INSERT INTO usuarios(nombres_completos,tipo_documento,numero_documento,contrasena,id_rol)
+    VALUES('Salida Olvidada','CC','70010','x',$1) RETURNING id_usuarios`,
+    [rol('Celador')],
+  );
+  await pool.query(
+    `INSERT INTO acceso(id_usuarios,tipo,fechahora,metodo,estado) VALUES($1,'ENTRADA',now()-interval '20 hours','Manual','Permitido')`,
+    [olvido.id_usuarios],
+  );
+  const deNuevo = await api('/ingresos', {
+    method: 'POST',
+    token: guardToken,
+    body: { id_usuarios: olvido.id_usuarios, tipo: 'ENTRADA', metodo: 'Manual', request_id: randomUUID() },
+  });
+  assert.equal(deNuevo.status, 201, JSON.stringify(deNuevo.body));
+});
+
+test('fichas: crear, jornada, asignar, trasladar, inscribir, horario, desvincular y eliminar', async () => {
+  await pool.query('DELETE FROM api_rate_limits');
+  const programa = await api('/programas', {
+    method: 'POST',
+    token: adminToken,
+    body: { nombre_programa: 'Programa sin fichas', nivel_programa: 'Tecnólogo' },
+  });
+  assert.equal(programa.status, 201, JSON.stringify(programa.body));
+  const idPrograma = programa.body.data.id_programa;
+  assert.deepEqual(programa.body.data.fichas, []);
+  const datos = {
+    numero_ficha: 'FG-1001',
+    nombre_ficha: 'ADSO mañana',
+    id_programa: idPrograma,
+    jornada: 'Mañana',
+    hora_inicio: '06:30',
+    hora_fin: '12:00',
+    modalidad: 'Presencial',
+    fecha_inicio: '2026-01-20',
+    fecha_fin: '2027-12-10',
+  };
+  assert.equal((await api('/fichas', { method: 'POST', token: studentToken, body: datos })).status, 403);
+  const creada = await api('/fichas', { method: 'POST', token: adminToken, body: datos });
+  assert.equal(creada.status, 201, JSON.stringify(creada.body));
+  const ficha = creada.body.data;
+  assert.equal(ficha.nombre_ficha, 'ADSO mañana');
+  assert.equal(ficha.hora_inicio, '06:30:00');
+  assert.equal((await api('/fichas', { method: 'POST', token: adminToken, body: datos })).status, 409);
+  assert.equal(
+    (await api('/fichas', { method: 'POST', token: adminToken, body: { ...datos, numero_ficha: 'FG-X', hora_fin: '05:00' } }))
+      .status,
+    422,
+  );
+  const otra = await api('/fichas', {
+    method: 'POST',
+    token: adminToken,
+    body: { numero_ficha: 'FG-1002', id_programa: idPrograma },
+  });
+  assert.equal(otra.status, 201);
+  // Asignar: los aprendices entran, quien no es aprendiz se rechaza.
+  const asignada = await api(`/fichas/${ficha.id_ficha}/aprendices`, {
+    method: 'POST',
+    token: adminToken,
+    body: { ids: [studentId, otherId, adminId] },
+  });
+  assert.equal(asignada.status, 200, JSON.stringify(asignada.body));
+  // Quien ya estaba en otra ficha de pruebas anteriores llega trasladado.
+  assert.equal(asignada.body.data.asignados.length + asignada.body.data.trasladados.length, 2);
+  assert.equal(asignada.body.data.rechazados[0].id_usuarios, adminId);
+  assert.equal(asignada.body.data.ficha.total_aprendices, 2);
+  const repetida = await api(`/fichas/${ficha.id_ficha}/aprendices`, {
+    method: 'POST',
+    token: adminToken,
+    body: { ids: [studentId] },
+  });
+  assert.equal(repetida.body.data.ya_estaban.length, 1);
+  // Trasladar a otra ficha cierra la anterior sin borrar su historial.
+  const traslado = await api(`/fichas/${otra.body.data.id_ficha}/aprendices`, {
+    method: 'POST',
+    token: adminToken,
+    body: { ids: [otherId] },
+  });
+  assert.equal(traslado.body.data.trasladados.length, 1);
+  const perfil = await api(`/usuarios/${otherId}`, { token: adminToken });
+  assert.equal(perfil.body.data.formacion.numero_ficha, 'FG-1002');
+  assert.equal(perfil.body.data.formacion.nombre_programa, 'Programa sin fichas');
+  const busqueda = await api('/usuarios?buscar=Kevin&limit=10', { token: adminToken });
+  assert.ok(busqueda.body.data.some((fila) => fila.id_usuarios === studentId && fila.formacion.numero_ficha === 'FG-1001'));
+  // Inscribir desde la ficha.
+  const inscrito = await api('/usuarios', {
+    method: 'POST',
+    token: adminToken,
+    body: {
+      nombres_completos: 'Inscrita Desde Ficha',
+      tipo_documento: 'TI',
+      numero_documento: '71001',
+      correo: 'inscrita@test.example',
+      id_rol: (await pool.query("SELECT id_rol FROM rol WHERE nombre_rol='Aprendiz'")).rows[0].id_rol,
+      id_ficha: ficha.id_ficha,
+    },
+  });
+  assert.equal(inscrito.status, 201, JSON.stringify(inscrito.body));
+  assert.equal(inscrito.body.data.formacion.id_ficha, ficha.id_ficha);
+  // Horario: agregar, conservar y quitar clases.
+  const {
+    rows: [instructor],
+  } = await pool.query(
+    `INSERT INTO usuarios(nombres_completos,tipo_documento,numero_documento,contrasena,id_rol)
+    SELECT 'Instructora Fichas','CC','71002','x',id_rol FROM rol WHERE nombre_rol='Instructor' RETURNING id_usuarios`,
+  );
+  const clase = (nombre, dia) => ({
+    nombre_clase: nombre,
+    dia_semana: dia,
+    hora_inicio: '07:00',
+    hora_fin: '09:00',
+    ambiente: 'Aula 3',
+    id_instructor: instructor.id_usuarios,
+  });
+  const conHorario = await api(`/fichas/${ficha.id_ficha}/horarios`, {
+    method: 'PUT',
+    token: adminToken,
+    body: { horarios: [clase('Lógica', 'Lunes'), clase('Inglés', 'Martes')] },
+  });
+  assert.equal(conHorario.status, 200, JSON.stringify(conHorario.body));
+  assert.equal(conHorario.body.data.horarios.length, 2);
+  const queda = conHorario.body.data.horarios.find((h) => h.nombre_clase === 'Lógica');
+  const reducido = await api(`/fichas/${ficha.id_ficha}/horarios`, {
+    method: 'PUT',
+    token: adminToken,
+    body: { horarios: [{ ...clase('Lógica', 'Lunes'), id_horario: queda.id_horario, ambiente: 'Aula 4' }] },
+  });
+  assert.deepEqual(
+    reducido.body.data.horarios.map((h) => [h.id_horario, h.ambiente]),
+    [[queda.id_horario, 'Aula 4']],
+  );
+  // Editar datos y jornada.
+  const editada = await api(`/fichas/${ficha.id_ficha}`, {
+    method: 'PATCH',
+    token: adminToken,
+    body: { ...datos, nombre_ficha: 'ADSO tarde', jornada: 'Tarde', hora_inicio: '13:00', hora_fin: '18:00' },
+  });
+  assert.equal(editada.status, 200, JSON.stringify(editada.body));
+  assert.equal(editada.body.data.hora_inicio, '13:00:00');
+  const listado = await api(`/fichas?id_programa=${idPrograma}&buscar=adso`, { token: adminToken });
+  assert.deepEqual(
+    listado.body.data.map((fila) => [fila.numero_ficha, fila.total_aprendices, fila.total_horarios]),
+    [['FG-1001', 2, 1]],
+  );
+  // Desvincular conserva la fila con fecha de salida.
+  assert.equal(
+    (await api(`/fichas/${ficha.id_ficha}/aprendices/${studentId}`, { method: 'DELETE', token: adminToken })).status,
+    204,
+  );
+  assert.equal(
+    (await api(`/fichas/${ficha.id_ficha}/aprendices/${studentId}`, { method: 'DELETE', token: adminToken })).status,
+    404,
+  );
+  // Programa con fichas no se elimina; ficha con asistencia tampoco.
+  assert.equal((await api(`/programas/${idPrograma}`, { method: 'DELETE', token: adminToken })).status, 409);
+  await pool.query(
+    `INSERT INTO asistencia(id_usuarios,id_jornada,fecha,estado)
+    SELECT $1,id_jornada,'2026-02-02','Presente' FROM jornada WHERE id_ficha=$2 LIMIT 1`,
+    [studentId, ficha.id_ficha],
+  );
+  assert.equal((await api(`/fichas/${ficha.id_ficha}`, { method: 'DELETE', token: adminToken })).status, 409);
+  assert.equal(
+    (await api(`/fichas/${otra.body.data.id_ficha}`, { method: 'DELETE', token: adminToken })).status,
+    204,
+  );
+  const vacio = await api('/programas', { method: 'POST', token: adminToken, body: { nombre_programa: 'Borrable' } });
+  assert.equal(
+    (await api(`/programas/${vacio.body.data.id_programa}`, { method: 'DELETE', token: adminToken })).status,
+    204,
+  );
+});
+
+test('carga masiva: revisión previa con errores, importación, fichas nuevas y activación por código', async () => {
+  await pool.query('DELETE FROM api_rate_limits');
+  const {
+    rows: [{ id_programa: programa }],
+  } = await pool.query("INSERT INTO programa(nombre_programa) VALUES('Gestión logística') RETURNING id_programa");
+  await pool.query("INSERT INTO ficha(numero_ficha,id_programa) VALUES('IMP-1',$1)", [programa]);
+  const fila = (documento, extra = {}) => ({
+    nombres_completos: `Persona ${documento}`,
+    tipo_documento: 'CC',
+    numero_documento: documento,
+    correo: `p${documento}@test.example`,
+    fecha_nacimiento: '31/05/2006',
+    numero_ficha: 'IMP-1',
+    ...extra,
+  });
+  const filas = [
+    fila('80001'),
+    fila('80002', { numero_ficha: 'IMP-2', programa: 'gestión LOGÍSTICA' }),
+    fila('80001', { correo: 'otro@test.example' }),
+    fila('10002'),
+    fila('80004', { nombres_completos: '' }),
+    fila('80005', { numero_ficha: 'IMP-9' }),
+    fila('80006', { rol: 'Instructor', numero_ficha: '' }),
+    fila('80007', { rol: 'Celador' }),
+  ];
+  const cuerpo = { filas, simular: true };
+  assert.equal((await api('/usuarios/importar', { method: 'POST', token: guardToken, body: cuerpo })).status, 403);
+  const revision = await api('/usuarios/importar', { method: 'POST', token: adminToken, body: cuerpo });
+  assert.equal(revision.status, 200, JSON.stringify(revision.body));
+  const estados = revision.body.data.filas.map((f) => [f.fila, f.valida, f.errores[0] ?? null]);
+  assert.deepEqual(estados, [
+    [1, true, null],
+    [2, true, null],
+    [3, false, 'Documento repetido en el archivo (fila 1)'],
+    [4, false, 'Ya existe una persona con este documento'],
+    [5, false, 'Falta el nombre completo'],
+    [6, false, 'La ficha IMP-9 no existe: escribe el programa para crearla'],
+    [7, true, null],
+    [8, false, 'Solo los aprendices se vinculan a una ficha'],
+  ]);
+  assert.equal(revision.body.data.filas[0].datos.fecha_nacimiento, '2006-05-31');
+  assert.deepEqual(revision.body.data.resumen, { total: 8, validas: 3, errores: 5, fichas: 2, fichas_nuevas: 1 });
+  assert.equal((await pool.query("SELECT count(*)::int n FROM usuarios WHERE numero_documento LIKE '8000%'")).rows[0].n, 0);
+  const importado = await api('/usuarios/importar', {
+    method: 'POST',
+    token: adminToken,
+    body: { filas, simular: false },
+  });
+  assert.equal(importado.status, 201, JSON.stringify(importado.body));
+  assert.deepEqual(importado.body.data.resumen, { creados: 3, fichas_actualizadas: 2, fichas_creadas: 1, omitidos: 5 });
+  assert.equal(importado.body.data.filas.length, 5);
+  const {
+    rows: [nueva],
+  } = await pool.query(
+    `SELECT f.numero_ficha,p.nombre_programa,count(af.*)::int aprendices FROM ficha f
+    JOIN programa p USING(id_programa) LEFT JOIN aprendiz_ficha af USING(id_ficha)
+    WHERE f.numero_ficha='IMP-2' GROUP BY 1,2`,
+  );
+  assert.deepEqual(nueva, { numero_ficha: 'IMP-2', nombre_programa: 'Gestión logística', aprendices: 1 });
+  // Sin contraseña conocida: la cuenta se activa con el código de recuperación.
+  const ingreso = await api('/auth/login', { method: 'POST', body: { documento: '80001', contrasena: '80001' } });
+  assert.equal(ingreso.status, 401);
+  const {
+    rows: [cuenta],
+  } = await pool.query("SELECT requiere_restablecimiento FROM usuarios WHERE numero_documento='80001'");
+  assert.equal(cuenta.requiere_restablecimiento, true);
+  // Repetir la misma carga no duplica a nadie.
+  const repetida = await api('/usuarios/importar', { method: 'POST', token: adminToken, body: { filas, simular: false } });
+  assert.equal(repetida.body.data.resumen.creados, 0);
+});
+
+test('reportes de ingresos y asistencia con fecha, persona, rol, programa y ficha', async () => {
+  const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
+  const accesos = await api(`/reportes/accesos?fecha=${hoy}&limit=100`, { token: adminToken });
+  assert.equal(accesos.status, 200, JSON.stringify(accesos.body));
+  const conContexto = accesos.body.data.find((fila) => fila.nombres_completos === 'Nuevo Aprendiz');
+  assert.equal(conContexto.nombre_rol, 'Aprendiz');
+  assert.equal(conContexto.numero_documento, '70001');
+  const asistencia = await api(`/reportes/asistencia?fecha=${hoy}&limit=100`, { token: adminToken });
+  assert.equal(asistencia.status, 200, JSON.stringify(asistencia.body));
+  const fila = asistencia.body.data.find((f) => f.nombres_completos === 'Nuevo Instructor');
+  assert.equal(fila.fecha, hoy);
+  assert.equal(fila.estado, 'Presente');
+  assert.ok(fila.hora_entrada && fila.hora_salida);
+  assert.equal(
+    (await api(`/reportes/asistencia?fecha=2026-01-01&hasta_fecha=2026-06-30`, { token: adminToken })).status,
+    422,
+  );
+  assert.equal((await api(`/reportes/asistencia?fecha=${hoy}`, { token: guardToken })).status, 403);
 });
