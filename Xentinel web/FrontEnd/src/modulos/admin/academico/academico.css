@@ -665,9 +665,14 @@
   gap: 4px 14px;
   counter-increment: paso;
 }
+/* Todo el contenido del paso va en la segunda columna, junto al número. */
+.xn-carga-pasos > li > * {
+  grid-column: 2;
+}
 .xn-carga-pasos > li::before {
   content: counter(paso);
-  grid-row: span 4;
+  grid-column: 1;
+  grid-row: 1 / span 6;
   display: grid;
   place-items: center;
   width: 30px;
