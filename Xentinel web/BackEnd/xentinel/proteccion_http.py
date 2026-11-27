@@ -22,6 +22,9 @@ MAXIMO_CUERPO = 64 * 1024
 # Solo la subida de la foto de perfil admite archivos de hasta 3 MB.
 MAXIMO_FOTO = 3 * 1024 * 1024 + 4096
 RUTA_FOTO = re.compile(r"^/api/v1/usuarios/\d+/foto$")
+# La carga masiva envía hasta 1000 filas de texto.
+MAXIMO_IMPORTACION = 1024 * 1024
+RUTA_IMPORTACION = "/api/v1/usuarios/importar"
 METODOS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 RUTAS_AUTH = {
     "/login",
@@ -288,7 +291,13 @@ class ProteccionHTTP:
                 if ruta == "/api/v1/alertas/sos" and metodo == "POST":
                     await run_in_threadpool(contar_peticion, db, ip, "sos", 30, 60)
             if metodo in ("POST", "PUT", "PATCH", "DELETE"):
-                maximo = MAXIMO_FOTO if RUTA_FOTO.match(ruta) else MAXIMO_CUERPO
+                maximo = (
+                    MAXIMO_FOTO
+                    if RUTA_FOTO.match(ruta)
+                    else MAXIMO_IMPORTACION
+                    if ruta == RUTA_IMPORTACION
+                    else MAXIMO_CUERPO
+                )
                 receive = await self.limitar_cuerpo(cabeceras, receive, maximo)
             await self.app(scope, receive, enviar)
         except ErrorAPI as error:
