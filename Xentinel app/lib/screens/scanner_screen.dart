@@ -622,6 +622,8 @@ class _ResultOverlay extends StatelessWidget {
       Denied(:final reason) => reason,
       Alert(:final reason) => reason,
       Unconfirmed(:final reason) => reason,
+      NotRegistered() =>
+        'El código no corresponde a ninguna persona registrada en Xentinel.',
       _ => null,
     };
 
@@ -660,6 +662,28 @@ class _ResultOverlay extends StatelessWidget {
                 Text(
                   user.role.dbValue,
                   style: TextStyle(color: fg.withValues(alpha: 0.8)),
+                ),
+              ],
+              if (result case final Granted granted) ...[
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: fg.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    granted.detail,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: fg,
+                    ),
+                  ),
                 ),
               ],
               if (result case Granted(:final person?)) ...[

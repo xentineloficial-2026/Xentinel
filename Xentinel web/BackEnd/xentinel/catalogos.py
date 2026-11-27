@@ -8,6 +8,7 @@ from psycopg import sql
 from pydantic import Field, field_validator, model_validator
 
 from .accesos import AULA_DE_FICHA, SITUACIONES_RETIRO
+from .fichas import guardar_jornada
 from .http import (
     ENTERO_MAXIMO,
     Base,
@@ -71,6 +72,11 @@ def alcance(sesion):
     return "instructor" if nombre_rol(sesion.usuario) == "instructor" else "fichas"
 
 
+def escapar_patron(texto):
+    """Busca el texto tal cual: % y _ no actúan como comodines."""
+    return texto.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def consultar(db, consulta, parametros):
     with db.transaccion() as conexion, conexion.conexion.cursor() as cursor:
         return cursor.execute(consulta, parametros).fetchall()
@@ -96,20 +102,44 @@ def horarios(db: Base, pagina: Paginacion, sesion: SesionActual):
 
 
 @rutas.get("/fichas")
-def fichas(db: Base, pagina: Paginacion, sesion: SesionActual):
+def fichas(
+    db: Base,
+    pagina: Paginacion,
+    sesion: SesionActual,
+    id_programa: Annotated[int | None, Query(ge=1, le=ENTERO_MAXIMO)] = None,
+    buscar: Annotated[str | None, Query(max_length=80)] = None,
+):
     """Administración ve todas las fichas; el instructor, las que tiene asignadas o en las
-    que dicta clase; el aprendiz, las suyas."""
+    que dicta clase; el aprendiz, las suyas. Cada ficha trae su programa, su jornada
+    vigente y cuántos aprendices tiene."""
     visible = alcance(sesion)
     filas = consultar(
         db,
-        f"""SELECT f.* FROM ficha f
-        WHERE %(alcance)s='todos'
+        f"""SELECT f.*,p.nombre_programa,p.nivel_programa,p.activo AS programa_activo,
+        v.hora_inicio,v.hora_fin,
+        (SELECT count(*) FROM aprendiz_ficha af WHERE af.id_ficha=f.id_ficha
+            AND af.fechasalida IS NULL)::int AS total_aprendices,
+        (SELECT count(*) FROM horarios h WHERE h.id_ficha=f.id_ficha)::int AS total_horarios
+        FROM ficha f JOIN programa p USING(id_programa)
+        LEFT JOIN LATERAL (SELECT j.hora_inicio,j.hora_fin FROM jornada j
+            WHERE j.id_ficha=f.id_ficha ORDER BY j.id_jornada DESC LIMIT 1) v ON true
+        WHERE (%(alcance)s='todos'
         OR (%(alcance)s='instructor' AND (f.id_ficha IN (SELECT id_ficha FROM instructor_ficha
             WHERE id_usuarios=%(id)s AND lower(estado)='activo')
             OR f.id_ficha IN (SELECT id_ficha FROM horarios WHERE id_instructor=%(id)s)))
-        OR (%(alcance)s='fichas' AND f.id_ficha IN ({FICHAS_DE_APRENDIZ}))
-        ORDER BY f.id_ficha LIMIT %(limit)s OFFSET %(offset)s""",
-        {"alcance": visible, "id": sesion.id, **pagina},
+        OR (%(alcance)s='fichas' AND f.id_ficha IN ({FICHAS_DE_APRENDIZ})))
+        AND (%(programa)s::integer IS NULL OR f.id_programa=%(programa)s)
+        AND (%(buscar)s::text IS NULL OR f.numero_ficha ILIKE %(patron)s
+            OR f.nombre_ficha ILIKE %(patron)s OR p.nombre_programa ILIKE %(patron)s)
+        ORDER BY f.id_ficha DESC LIMIT %(limit)s OFFSET %(offset)s""",
+        {
+            "alcance": visible,
+            "id": sesion.id,
+            "programa": id_programa,
+            "buscar": buscar or None,
+            "patron": f"%{escapar_patron(buscar or '')}%",
+            **pagina,
+        },
     )
     return responder(filas, meta={**pagina, "alcance": visible})
 
@@ -181,31 +211,14 @@ class JornadaFicha(Entrada):
 def cambiar_jornada(id: IdRuta, datos: JornadaFicha, db: Base, sesion: Administrador):
     """La jornada más reciente es la vigente. Las anteriores se conservan: la asistencia
     ya registrada sigue apuntando al horario con el que se calificó."""
-    inicio = time.fromisoformat(datos.hora_inicio)
-    fin = time.fromisoformat(datos.hora_fin)
     with db.transaccion() as conexion:
         if not conexion.ejecutar(
             "UPDATE ficha SET jornada=%s WHERE id_ficha=%s", datos.nombre, id
         ):
             raise ErrorAPI(404, "NOT_FOUND", "Ficha no encontrada")
-        vigente = conexion.fila(
-            """SELECT * FROM jornada WHERE id_ficha=%s
-            ORDER BY id_jornada DESC LIMIT 1 FOR UPDATE""",
-            id,
+        vigente = guardar_jornada(
+            conexion, id, datos.nombre, datos.hora_inicio, datos.hora_fin
         )
-        if not vigente or (
-            vigente["nombre"],
-            vigente["hora_inicio"],
-            vigente["hora_fin"],
-        ) != (datos.nombre, inicio, fin):
-            vigente = conexion.fila(
-                """INSERT INTO jornada(id_ficha,nombre,hora_inicio,hora_fin)
-                VALUES(%s,%s,%s,%s) RETURNING *""",
-                id,
-                datos.nombre,
-                inicio,
-                fin,
-            )
     return responder(vigente)
 
 
@@ -444,23 +457,81 @@ def exportar_pagina(db, parametros, sql_maximo, sql_filas, valores, clave):
     )
 
 
+# Persona, rol, programa y ficha activa de `u` (o la última, si ya salió de todas).
+CONTEXTO_REPORTE = """JOIN usuarios u ON u.id_usuarios=x.id_usuarios JOIN rol r ON r.id_rol=u.id_rol
+    LEFT JOIN LATERAL (SELECT af.id_ficha FROM aprendiz_ficha af WHERE af.id_usuarios=u.id_usuarios
+        ORDER BY af.fechasalida IS NULL DESC,af.id_aprendiz_ficha DESC LIMIT 1) ua ON true
+    LEFT JOIN ficha f ON f.id_ficha=coalesce(%s,ua.id_ficha)
+    LEFT JOIN programa p ON p.id_programa=f.id_programa"""
+COLUMNAS_CONTEXTO = """u.nombres_completos,u.tipo_documento,u.numero_documento,r.nombre_rol,
+    f.numero_ficha,p.nombre_programa"""
+
+
+def rango_de_fechas(fecha, hasta_fecha):
+    final = hasta_fecha or fecha
+    if final < fecha or (final - fecha).days > 92:
+        raise ErrorAPI(
+            422, "INVALID_RANGE", "El periodo debe ser de máximo tres meses"
+        )
+    return fecha, final
+
+
 @reportes.get("/accesos")
 def exportar_accesos(
     fecha: Annotated[date, Query()],
     db: Base,
     parametros: ParametrosExportacion,
     sesion: Administrador,
+    hasta_fecha: Annotated[date | None, Query()] = None,
 ):
-    rango = """fechahora >= (%s::date::timestamp AT TIME ZONE 'America/Bogota')
-        AND fechahora < ((%s::date + 1)::timestamp AT TIME ZONE 'America/Bogota')"""
+    """Movimientos de uno o varios días (hora de Bogotá), con la persona, su rol, su
+    programa y su ficha."""
+    desde, final = rango_de_fechas(fecha, hasta_fecha)
+    rango = """x.fechahora >= (%s::date::timestamp AT TIME ZONE 'America/Bogota')
+        AND x.fechahora < ((%s::date + 1)::timestamp AT TIME ZONE 'America/Bogota')"""
     return exportar_pagina(
         db,
         parametros,
-        f"SELECT COALESCE(max(id_acceso),0) hasta FROM acceso WHERE {rango}",
-        f"""SELECT id_acceso,id_usuarios,tipo,fechahora,metodo,estado FROM acceso WHERE {rango}
-        AND id_acceso>%s AND id_acceso<=%s ORDER BY id_acceso LIMIT %s""",
-        (fecha, fecha),
+        f"SELECT COALESCE(max(id_acceso),0) hasta FROM acceso x WHERE {rango}",
+        f"""SELECT x.id_acceso,x.id_usuarios,x.tipo,x.fechahora,x.metodo,x.estado,
+        {COLUMNAS_CONTEXTO} FROM acceso x {CONTEXTO_REPORTE.replace("%s", "NULL")}
+        WHERE {rango} AND x.id_acceso>%s AND x.id_acceso<=%s ORDER BY x.id_acceso LIMIT %s""",
+        (desde, final),
         "id_acceso",
+    )
+
+
+@reportes.get("/asistencia")
+def exportar_asistencia(
+    fecha: Annotated[date, Query()],
+    db: Base,
+    parametros: ParametrosExportacion,
+    sesion: Administrador,
+    hasta_fecha: Annotated[date | None, Query()] = None,
+    id_ficha: Annotated[int | None, Query(ge=1, le=ENTERO_MAXIMO)] = None,
+):
+    """Asistencia de todas las personas (o de una ficha) en un periodo: fecha, hora de
+    entrada, hora de salida y estado, con el contexto de cada persona."""
+    desde, final = rango_de_fechas(fecha, hasta_fecha)
+    filtro = """x.fecha BETWEEN %s AND %s AND (%s::integer IS NULL OR j.id_ficha=%s
+        OR (x.id_jornada IS NULL AND EXISTS (SELECT 1 FROM aprendiz_ficha af
+            WHERE af.id_usuarios=x.id_usuarios AND af.id_ficha=%s AND af.fechasalida IS NULL)))"""
+    valores = (desde, final, id_ficha, id_ficha, id_ficha)
+    return exportar_pagina(
+        db,
+        parametros,
+        f"""SELECT COALESCE(max(x.id_asistencia),0) hasta FROM asistencia x
+        LEFT JOIN jornada j ON j.id_jornada=x.id_jornada WHERE {filtro}""",
+        f"""SELECT x.id_asistencia,x.id_usuarios,x.fecha,x.hora_entrada,x.hora_salida,
+        CASE WHEN x.estado ILIKE 'ausen%%' THEN 'Ausente'
+            WHEN x.estado ILIKE '%%tard%%' OR x.estado ILIKE '%%retra%%' THEN 'Retardo'
+            WHEN x.estado='Sin registro' THEN 'Sin registro' ELSE 'Presente' END AS estado,
+        {COLUMNAS_CONTEXTO} FROM asistencia x LEFT JOIN jornada j ON j.id_jornada=x.id_jornada
+        {CONTEXTO_REPORTE.replace("%s", "j.id_ficha")}
+        WHERE {filtro} AND x.id_asistencia>%s AND x.id_asistencia<=%s
+        ORDER BY x.id_asistencia LIMIT %s""",
+        valores,
+        "id_asistencia",
     )
 
 

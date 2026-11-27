@@ -32,7 +32,7 @@ class FeedbackService {
       Granted(isExit: false) => ('sounds/ok.wav', <int>[0, 150]),
       Granted(isExit: true) => ('sounds/salida.wav', <int>[0, 70, 90, 70]),
       Alert() => ('sounds/warn.wav', <int>[0, 200, 100, 200]),
-      NotRegistered() => ('sounds/warn.wav', <int>[0, 200, 100, 200]),
+      NotRegistered() => ('sounds/error.wav', <int>[0, 500]),
       Denied() => ('sounds/error.wav', <int>[0, 500]),
       VisitorAccess() => ('sounds/ok.wav', <int>[0, 100, 80, 100]),
       Unconfirmed() => ('sounds/warn.wav', <int>[0, 200, 100, 200]),

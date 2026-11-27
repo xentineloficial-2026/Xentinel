@@ -130,8 +130,16 @@ class ScannedPerson {
 /// PERMITIDO. La entrada y la salida se distinguen a simple vista y al oído:
 /// verde con «¡Bienvenido!» al entrar, azul institucional con «¡Hasta pronto!» al salir.
 final class Granted extends AccessScanResult {
-  const Granted({super.user, this.person, this.isExit = false});
+  const Granted({
+    super.user,
+    this.person,
+    this.isExit = false,
+    this.attendance,
+  });
   final ScannedPerson? person;
+
+  /// Estado de la asistencia del día que dejó el registro (Presente o Retardo).
+  final String? attendance;
 
   /// Movimiento de SALIDA registrado (ENTRADA si es `false`).
   final bool isExit;
@@ -143,6 +151,12 @@ final class Granted extends AccessScanResult {
   Color get color => isExit ? const Color(0xFF18458D) : const Color(0xFF1B7F53);
   @override
   String get message => isExit ? exitMessage : entryMessage;
+
+  /// Confirmación de que la asistencia quedó guardada en el servidor.
+  String get detail => isExit
+      ? 'Salida registrada en la asistencia del día'
+      : 'Asistencia registrada con éxito'
+            '${attendance != null ? ' · $attendance' : ''}';
   @override
   AccessStatus get status => AccessStatus.permitido;
 }
@@ -162,21 +176,24 @@ final class Alert extends AccessScanResult {
   AccessStatus get status => AccessStatus.pendiente;
 }
 
-/// NO ENCONTRADO (amarillo): el QR es legible, pero el usuario no está registrado.
+/// NO ENCONTRADO (rojo): el QR es legible, pero la persona no está registrada.
 final class NotRegistered extends AccessScanResult {
   const NotRegistered();
 
   @override
-  Color get color => const Color(0xFFE8A33D);
+  Color get color => const Color(0xFFC4231A);
   @override
-  String get message => 'Usuario no registrado';
+  String get message => 'Usuario no encontrado';
   @override
   AccessStatus get status => AccessStatus.pendiente;
 }
 
 /// DENEGADO (rojo).
 final class Denied extends AccessScanResult {
-  const Denied({super.user, this.reason, this.person});
+  const Denied({super.user, this.reason, this.person, this.title});
+
+  /// Título del rechazo, por ejemplo «Usuario inactivo». Sin él: «Acceso denegado».
+  final String? title;
 
   /// Motivo de rechazo que se muestra al personal de control de acceso.
   final String? reason;
@@ -187,7 +204,7 @@ final class Denied extends AccessScanResult {
   @override
   Color get color => const Color(0xFFC4231A);
   @override
-  String get message => 'Acceso denegado';
+  String get message => title ?? 'Acceso denegado';
   @override
   AccessStatus get status => AccessStatus.denegado;
 }

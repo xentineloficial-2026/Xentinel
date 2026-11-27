@@ -16,6 +16,7 @@ VERSIONES = (
     "005_rls_correo_opcional",
     "006_codigos_sismos",
     "007_alarmas_asistencia_correo",
+    "008_asistencia_general_fichas",
 )
 
 
@@ -97,6 +98,7 @@ def verificar_esquema(db):
         "SELECT evento_id, distancia_km, id_alerta FROM sismos_detectados LIMIT 0",
         "SELECT proposito, correo_nuevo FROM password_reset_tokens LIMIT 0",
         "SELECT motivo, semaforo, huella, atendida_en FROM alarmas_qr LIMIT 0",
+        "SELECT nombre_ficha FROM ficha LIMIT 0",
     ):
         db.ejecutar(consulta)
 

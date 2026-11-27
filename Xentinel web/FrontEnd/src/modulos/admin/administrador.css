@@ -109,3 +109,66 @@
   padding-inline: 0.35rem;
   font-weight: 700;
 }
+
+/* Diálogo de reportes: tipo de reporte como opciones grandes y fechas en línea. */
+.xn-reporte-tipos {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  min-width: 0;
+  margin: 0 0 6px;
+  padding: 0;
+  border: 0;
+}
+.xn-reporte-tipos legend {
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+.xn-reporte-tipo {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--xn-borde);
+  border-radius: 12px;
+  cursor: pointer;
+}
+.xn-reporte-tipo[data-elegido='true'] {
+  border-color: var(--xn-contorno);
+  background: var(--xn-azul-suave);
+}
+.xn-reporte-tipo input {
+  margin-top: 3px;
+  accent-color: var(--xn-accion);
+}
+.xn-reporte-tipo span {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--xn-tenue);
+}
+.xn-reporte-tipo strong {
+  font-size: 15px;
+  color: var(--xn-texto);
+}
+.xn-reporte-formulario .xn-formulario-cuadricula {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+@media (max-width: 560px) {
+  .xn-reporte-tipos {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.xn-formacion-celda {
+  display: grid;
+  gap: 2px;
+  font-size: 13px;
+  color: var(--xn-tenue);
+}
+.xn-formacion-celda strong {
+  font-size: 14px;
+  color: var(--xn-texto);
+  font-variant-numeric: tabular-nums;
+}

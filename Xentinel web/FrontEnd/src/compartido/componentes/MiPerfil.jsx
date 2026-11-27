@@ -346,6 +346,24 @@ function EditorPerfil({ usuario }) {
             <strong>{usuario.nombres_completos}</strong>
             <span>{usuario.nombre_rol}</span>
           </div>
+          {usuario.formacion ? (
+            <dl className="xn-perfil-formacion">
+              <dt>Programa de formación</dt>
+              <dd>{usuario.formacion.nombre_programa}</dd>
+              <dt>Ficha</dt>
+              <dd>
+                {usuario.formacion.numero_ficha}
+                {usuario.formacion.nombre_ficha &&
+                  ` · ${usuario.formacion.nombre_ficha}`}
+              </dd>
+            </dl>
+          ) : (
+            usuario.nombre_rol === 'Aprendiz' && (
+              <p className="xn-ayuda">
+                Aún no tienes una ficha asignada. Pídela a la coordinación.
+              </p>
+            )
+          )}
         </section>
         <div className="xn-perfil-columna">
           <section className="xn-trabajo-tarjeta">

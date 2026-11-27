@@ -1,8 +1,8 @@
 """Directorio administrativo y operaciones autorizadas sobre perfiles y fichas."""
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Query, Request, Response
 from psycopg import sql
 
 from .autenticacion import (
@@ -15,6 +15,8 @@ from .autenticacion import (
     insertar_usuario,
     invalidar_tokens,
 )
+from .catalogos import escapar_patron
+from .fichas import vincular
 from .http import Base, Entrada, ErrorAPI, Id, IdRuta, Paginacion, responder, texto
 from .seguridad import (
     COLUMNAS_PERSONA,
@@ -31,12 +33,37 @@ from .seguridad import (
 rutas = APIRouter(prefix="/usuarios", tags=["Personas"])
 Estado = Literal["Activo", "Inactivo"]
 CAMPOS_PROPIOS = {"nombres_completos", "telefono", "fecha_nacimiento"}
+# Ficha activa más reciente de la persona `u`, con su programa.
+FORMACION = """LEFT JOIN LATERAL (SELECT f.id_ficha,f.numero_ficha,f.nombre_ficha,
+        p.id_programa,p.nombre_programa FROM aprendiz_ficha af
+        JOIN ficha f ON f.id_ficha=af.id_ficha JOIN programa p ON p.id_programa=f.id_programa
+        WHERE af.id_usuarios=u.id_usuarios AND af.fechasalida IS NULL
+        ORDER BY af.id_aprendiz_ficha DESC LIMIT 1) fa ON true"""
+COLUMNAS_FORMACION = (
+    "id_ficha",
+    "numero_ficha",
+    "nombre_ficha",
+    "id_programa",
+    "nombre_programa",
+)
+
+
+def con_formacion(persona):
+    """Datos públicos de la persona más el programa y la ficha a los que pertenece."""
+    formacion = (
+        {campo: persona[campo] for campo in COLUMNAS_FORMACION}
+        if persona.get("id_ficha")
+        else None
+    )
+    return {**usuario_publico(persona), "formacion": formacion}
 
 
 class AltaUsuario(Registro):
     id_rol: Id
     # Piloto: sin contraseña escrita, la inicial es el número de documento.
     contrasena: Clave | None = None
+    # Inscribir desde la ficha: el aprendiz queda vinculado en la misma operación.
+    id_ficha: Id | None = None
 
 
 class EdicionUsuario(Entrada):
@@ -65,19 +92,29 @@ def listar(
     sesion: Administrador,
     id_rol: Id = None,
     estado: Estado = None,
+    buscar: Annotated[str | None, Query(max_length=80)] = None,
 ):
+    """Directorio con filtros por rol, estado y texto (nombre, documento o correo)."""
+    patron = f"%{escapar_patron(buscar or '')}%"
     personas = db.filas(
-        f"""SELECT {COLUMNAS_PERSONA} FROM usuarios u JOIN rol r USING(id_rol)
+        f"""SELECT {COLUMNAS_PERSONA},{",".join("fa." + c for c in COLUMNAS_FORMACION)}
+        FROM usuarios u JOIN rol r USING(id_rol) {FORMACION}
         WHERE (%s::integer IS NULL OR u.id_rol=%s) AND (%s::text IS NULL OR lower(u.estado)=lower(%s))
+        AND (%s::text IS NULL OR u.nombres_completos ILIKE %s OR u.numero_documento ILIKE %s
+            OR u.correo ILIKE %s)
         ORDER BY u.id_usuarios LIMIT %s OFFSET %s""",
         id_rol,
         id_rol,
         estado,
         estado,
+        buscar or None,
+        patron,
+        patron,
+        patron,
         pagina["limit"],
         pagina["offset"],
     )
-    meta = {**pagina, "id_rol": id_rol, "estado": estado}
+    meta = {**pagina, "id_rol": id_rol, "estado": estado, "buscar": buscar or None}
     if estado:
         meta["totales"] = db.fila(
             """SELECT count(*) FILTER (WHERE lower(estado)='activo')::int activos,
@@ -86,15 +123,40 @@ def listar(
             id_rol,
             id_rol,
         )
-    return responder([usuario_publico(persona) for persona in personas], meta=meta)
+    return responder([con_formacion(persona) for persona in personas], meta=meta)
+
+
+def formacion_de(conexion, identificador):
+    persona = conexion.fila(
+        f"""SELECT {COLUMNAS_PERSONA},{",".join("fa." + c for c in COLUMNAS_FORMACION)}
+        FROM usuarios u JOIN rol r USING(id_rol) {FORMACION} WHERE u.id_usuarios=%s""",
+        identificador,
+    )
+    return con_formacion(persona) if persona else None
 
 
 @rutas.post("", status_code=201)
-def crear(datos: AltaUsuario, db: Base, sesion: Administrador):
+def crear(datos: AltaUsuario, db: Base, solicitud: Request, sesion: Administrador):
     hash_guardado = hash_clave(datos.contrasena or datos.numero_documento)
     with db.transaccion() as conexion:
         usuario = insertar_usuario(conexion, datos, hash_guardado, datos.id_rol)
-    return responder(usuario_publico(usuario), 201)
+        if datos.id_ficha:
+            if not conexion.fila(
+                "SELECT 1 FROM ficha WHERE id_ficha=%s FOR SHARE", datos.id_ficha
+            ):
+                raise ErrorAPI(404, "NOT_FOUND", "Ficha no encontrada")
+            resultado = vincular(
+                conexion,
+                datos.id_ficha,
+                [usuario["id_usuarios"]],
+                solicitud.app.state.configuracion.ZONA_HORARIA,
+            )
+            if resultado["rechazados"]:
+                raise ErrorAPI(
+                    422, "NOT_APPRENTICE", resultado["rechazados"][0]["motivo"]
+                )
+        usuario = formacion_de(conexion, usuario["id_usuarios"])
+    return responder(usuario, 201)
 
 
 @rutas.get("/documento/{numero}")
@@ -114,10 +176,11 @@ def por_documento(numero: Documento, db: Base, sesion: CeladorOAdmin):
 @rutas.get("/{id}")
 def detalle(id: IdRuta, db: Base, sesion: SesionActual):
     validar_titular(sesion, id)
-    usuario = usuario_por_id(db, id)
+    with db.transaccion() as conexion:
+        usuario = formacion_de(conexion, id)
     if not usuario:
         raise usuario_ausente()
-    return responder(usuario_publico(usuario))
+    return responder(usuario)
 
 
 @rutas.patch("/{id}")

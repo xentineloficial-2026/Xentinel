@@ -122,16 +122,23 @@ class AccessRepository {
         'No se pudo confirmar el registro. Verifica el historial antes de repetirlo.',
       );
     }
+    final asistencia = data['asistencia'];
+    final motivo = data['motivo'];
+    final retirado = motivo is Map && motivo['codigo'] == 'APRENDIZ_RETIRADO';
     return switch (data['estado']) {
       'Permitido' => Granted(
         person: ScannedPerson.fromApi(data['persona']),
         isExit: type == 'SALIDA',
+        attendance: asistencia is Map ? asistencia['estado']?.toString() : null,
       ),
       'Visitante' => const VisitorAccess(),
       'Denegado' => Denied(
         user: null,
-        reason:
-            'Esta persona está inactiva o retirada. Consulta con administración.',
+        title: retirado ? 'Aprendiz retirado' : 'Usuario inactivo',
+        reason: retirado
+            ? 'Está retirado o desertado de la formación. No ingresa a la sede.'
+            : 'La cuenta está desactivada. No ingresa a la sede; consulta con '
+                  'administración.',
         person: ScannedPerson.fromApi(data['persona']),
       ),
       _ => throw const ApiException(

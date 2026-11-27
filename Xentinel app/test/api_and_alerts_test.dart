@@ -201,6 +201,44 @@ void main() {
     },
   );
 
+  test(
+    'the scanner confirms the attendance and names why access was denied',
+    () async {
+      final now = DateTime.utc(2026, 11, 27);
+      var respuesta = <String, Object?>{};
+      final repository = AccessRepository(
+        api((request) {
+          final body = jsonDecode(request.body) as Map;
+          return ok({'id_usuarios': 7, 'tipo': body['tipo'], ...respuesta});
+        }),
+        now: () => now,
+      );
+      final payload = 'XENTINEL:7:${now.millisecondsSinceEpoch}';
+      respuesta = {
+        'estado': 'Permitido',
+        'asistencia': {'estado': 'Retardo'},
+      };
+      final entry = await repository.processScanPayload(
+        payload: payload,
+        isExitMode: false,
+      );
+      expect(
+        (entry as Granted).detail,
+        'Asistencia registrada con éxito · Retardo',
+      );
+      respuesta = {
+        'estado': 'Denegado',
+        'motivo': {'codigo': 'USUARIO_INACTIVO'},
+      };
+      final inactive = await repository.processScanPayload(
+        payload: '$payload ',
+        isExitMode: true,
+      );
+      expect(inactive.message, 'Usuario inactivo');
+      expect(const NotRegistered().message, 'Usuario no encontrado');
+    },
+  );
+
   test('without network the scan is not attempted and says so', () async {
     var calls = 0;
     final connectivity = FakeConnectivity(online: false);

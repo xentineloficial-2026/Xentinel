@@ -22,6 +22,11 @@ import {
   Paginacion,
 } from '../../compartido/componentes/TablaDatos.jsx';
 import { usePaginacion } from '../../compartido/utilidades/tablas.js';
+import { FileUp as Importar } from 'lucide-react';
+import { useRetardo } from './academico/utilidades.js';
+import { CargaMasiva } from './academico/CargaMasiva.jsx';
+import { textoResumen } from './academico/utilidades.js';
+import './administrador.css';
 /* personaVacia: valor de trabajo utilizado en esta operación. */
 const personaVacia = {
   nombres_completos: '',
@@ -33,6 +38,7 @@ const personaVacia = {
   contrasena: '',
   id_rol: '',
   estado: 'Activo',
+  id_ficha: '',
 };
 function EditorPersona({ usuario, alCerrar, alGuardar, alDesactivar }) {
   /* editando: valor de trabajo utilizado en esta operación. */
@@ -42,7 +48,10 @@ function EditorPersona({ usuario, alCerrar, alGuardar, alDesactivar }) {
     ...personaVacia,
     ...usuario,
     fecha_nacimiento: usuario?.fecha_nacimiento?.slice(0, 10) || '',
+    id_ficha: String(usuario?.formacion?.id_ficha ?? ''),
   }));
+  /* fichas: para vincular al aprendiz con su ficha desde su perfil. */
+  const fichas = useRecurso('/fichas?limit=100');
   /* foto: archivo elegido; se sube después de guardar los datos. */
   const [foto, cambiarFoto] = useEstado(null);
   /* roles: consulta cancelable al servidor, con datos, estado y reintento. */
@@ -122,9 +131,11 @@ function EditorPersona({ usuario, alCerrar, alGuardar, alDesactivar }) {
               ? { situacion_formativa: formulario.situacion_formativa }
               : {}),
           }
-        : formulario.contrasena
-          ? { contrasena: formulario.contrasena }
-          : {}),
+        : {
+            ...(formulario.contrasena && { contrasena: formulario.contrasena }),
+            ...(esAprendiz &&
+              formulario.id_ficha && { id_ficha: Number(formulario.id_ficha) }),
+          }),
     };
     ocupado.current = true;
     cambiarGuardando(true);
@@ -136,6 +147,26 @@ function EditorPersona({ usuario, alCerrar, alGuardar, alDesactivar }) {
           body: cuerpo,
         }
       );
+      const fichaAnterior = String(usuario?.formacion?.id_ficha ?? '');
+      if (editando && esAprendiz && formulario.id_ficha !== fichaAnterior) {
+        try {
+          if (formulario.id_ficha)
+            await solicitar(`/fichas/${formulario.id_ficha}/aprendices`, {
+              method: 'POST',
+              body: { ids: [usuario.id_usuarios] },
+            });
+          else
+            await solicitar(
+              `/fichas/${fichaAnterior}/aprendices/${usuario.id_usuarios}`,
+              { method: 'DELETE' }
+            );
+        } catch (motivo) {
+          cambiarError(
+            `Los datos se guardaron, pero la ficha no: ${motivo.message}`
+          );
+          return;
+        }
+      }
       if (foto) {
         try {
           await subirFoto(guardado.id_usuarios, foto);
@@ -279,6 +310,47 @@ function EditorPersona({ usuario, alCerrar, alGuardar, alDesactivar }) {
                 </button>
               )}
             </div>
+            {esAprendiz && (
+              <div className="xn-campo">
+                <label htmlFor="user-ficha">Ficha</label>
+                <select
+                  id="user-ficha"
+                  value={formulario.id_ficha}
+                  disabled={guardando}
+                  onChange={(evento) =>
+                    cambiar('id_ficha', evento.target.value)
+                  }
+                >
+                  <option value="">Sin ficha</option>
+                  {formulario.id_ficha &&
+                    !fichas.datos?.some(
+                      (ficha) => String(ficha.id_ficha) === formulario.id_ficha
+                    ) && (
+                      <option value={formulario.id_ficha}>
+                        {usuario?.formacion?.numero_ficha ??
+                          formulario.id_ficha}
+                      </option>
+                    )}
+                  {fichas.datos?.map((ficha) => (
+                    <option key={ficha.id_ficha} value={ficha.id_ficha}>
+                      {ficha.numero_ficha} · {ficha.nombre_programa}
+                    </option>
+                  ))}
+                </select>
+                <p className="xn-ayuda">
+                  {(() => {
+                    const elegida = fichas.datos?.find(
+                      (ficha) => String(ficha.id_ficha) === formulario.id_ficha
+                    );
+                    if (elegida)
+                      return `Programa: ${elegida.nombre_programa}${elegida.jornada ? ` · Jornada ${elegida.jornada}` : ''}`;
+                    if (usuario?.formacion && formulario.id_ficha)
+                      return `Programa: ${usuario.formacion.nombre_programa}`;
+                    return 'Asígnale una ficha para que aparezca en su lista de asistencia.';
+                  })()}
+                </p>
+              </div>
+            )}
             {editando && esAprendiz ? (
               <div className="xn-campo">
                 <label htmlFor="user-situacion">Situación formativa</label>
@@ -360,12 +432,14 @@ function GestionPersonas() {
   const paginacion = usePaginacion();
   /* recurso: consulta cancelable al servidor, con datos, estado y reintento. */
   const [estado, cambiarEstado] = useEstado('Activo');
+  /* busqueda, cambiarBusqueda: texto buscado en todo el directorio, no solo en la página. */
+  const [busqueda, cambiarBusqueda] = useEstado('');
+  const buscar = useRetardo(busqueda.trim());
+  const [importando, cambiarImportando] = useEstado(false);
   const recurso = useRecurso(
-    `/usuarios?estado=${estado}&${paginacion.consulta}`
+    `/usuarios?estado=${estado}&${paginacion.consulta}${buscar ? `&buscar=${encodeURIComponent(buscar)}` : ''}`
   );
   const totales = recurso.metadatos?.totales;
-  /* busqueda, cambiarBusqueda: estado de la vista y función para actualizarlo. */
-  const [busqueda, cambiarBusqueda] = useEstado('');
   /* editor, cambiarEditor: estado de la vista y función para actualizarlo. */
   const [editor, cambiarEditor] = useEstado(null);
   /* objetivo, cambiarObjetivo: estado de la vista y función para actualizarlo. */
@@ -401,11 +475,7 @@ function GestionPersonas() {
     }
   };
   /* filas: valor de trabajo utilizado en esta operación. */
-  const filas = (recurso.datos || []).filter((fila) =>
-    `${fila.nombres_completos} ${fila.numero_documento} ${fila.correo}`
-      .toLowerCase()
-      .includes(busqueda.toLowerCase())
-  );
+  const filas = recurso.datos || [];
   if (editor)
     return (
       <>
@@ -445,9 +515,17 @@ function GestionPersonas() {
             cuidado.
           </p>
         </div>
-        <button className="xn-boton" onClick={() => cambiarEditor({})}>
-          Agregar persona
-        </button>
+        <div className="xn-admin-acciones">
+          <button
+            className="xn-boton xn-boton--secundario"
+            onClick={() => cambiarImportando(true)}
+          >
+            <Importar size={17} aria-hidden="true" /> Carga masiva
+          </button>
+          <button className="xn-boton" onClick={() => cambiarEditor({})}>
+            Agregar persona
+          </button>
+        </div>
       </div>
       <MensajeEstado {...retroalimentacion} />
       <section className="xn-trabajo-tarjeta">
@@ -477,11 +555,15 @@ function GestionPersonas() {
           ))}
         </div>
         <div className="xn-busqueda">
-          <label htmlFor="user-search">Buscar en esta página</label>
+          <label htmlFor="user-search">Buscar personas</label>
           <input
             id="user-search"
+            type="search"
             value={busqueda}
-            onChange={(evento) => cambiarBusqueda(evento.target.value)}
+            onChange={(evento) => {
+              cambiarBusqueda(evento.target.value);
+              paginacion.cambiarPagina(1);
+            }}
             placeholder="Nombre, documento o correo"
           />
           {busqueda && (
@@ -501,7 +583,7 @@ function GestionPersonas() {
             filas={filas}
             vacio={
               busqueda
-                ? 'No encontramos coincidencias en esta página.'
+                ? 'Nadie coincide con la búsqueda.'
                 : estado === 'Activo'
                   ? 'No hay personas activas en esta página.'
                   : 'No hay personas inactivas en esta página.'
@@ -522,6 +604,21 @@ function GestionPersonas() {
               {
                 clave: 'nombre_rol',
                 etiqueta: 'Rol',
+              },
+              {
+                clave: 'formacion',
+                etiqueta: 'Programa y ficha',
+                representar: (fila) =>
+                  fila.formacion ? (
+                    <span className="xn-formacion-celda">
+                      <strong>Ficha {fila.formacion.numero_ficha}</strong>
+                      {fila.formacion.nombre_programa}
+                    </span>
+                  ) : fila.nombre_rol === 'Aprendiz' ? (
+                    <span className="xn-estado es-aviso">Sin ficha</span>
+                  ) : (
+                    '—'
+                  ),
               },
               {
                 clave: 'estado',
@@ -564,6 +661,17 @@ function GestionPersonas() {
           />
         </EstadoConsulta>
       </section>
+      {importando && (
+        <CargaMasiva
+          alCerrar={() => cambiarImportando(false)}
+          alImportar={(resumen) => {
+            cambiarRetroalimentacion({
+              mensaje: `${textoResumen(resumen, false)}.`,
+            });
+            recurso.actualizar();
+          }}
+        />
+      )}
       {objetivo && (
         <Dialogo
           titulo="Desactivar cuenta"
