@@ -9,7 +9,7 @@ export async function migrate(pool) {
     await db.query(
       `CREATE TABLE IF NOT EXISTS schema_migrations(version text PRIMARY KEY, checksum char(64) NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())`,
     );
-    for (const version of ['001_base', '002_security_realtime', '003_programas_admin', '004_perfil_asistencia', '005_rls_correo_opcional', '006_codigos_sismos', '007_alarmas_asistencia_correo']) {
+    for (const version of ['001_base', '002_security_realtime', '003_programas_admin', '004_perfil_asistencia', '005_rls_correo_opcional', '006_codigos_sismos', '007_alarmas_asistencia_correo', '008_asistencia_general_fichas']) {
       const sql = await readFile(new URL(`../sql/${version}.sql`, import.meta.url), 'utf8');
       const checksum = createHash('sha256').update(sql).digest('hex');
       const {
