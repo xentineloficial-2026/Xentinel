@@ -1,4 +1,5 @@
-/** Lector activado por la persona operadora. Detiene cámara y escáner al salir o reconocer un código. */
+/** Lector activado por la persona operadora. Sigue leyendo entre una persona y la siguiente y
+ * detiene la cámara al salir. Una lectura repetida del mismo carnet se ignora unos segundos. */
 import {
   useEffect as useEfecto,
   useId as useIdentificador,
@@ -7,6 +8,10 @@ import {
 } from 'react';
 import { Camera as Camara, ScanLine as Escaneo } from 'lucide-react';
 import { leerCodigoAcceso } from '../../compartido/utilidades/codigoQr.js';
+import { tocarTono } from '../../compartido/utilidades/tonos.js';
+/* Pausa entre lecturas y tiempo en que el mismo código no se vuelve a enviar. */
+const PAUSA_MS = 2500;
+const REPETIDO_MS = 6000;
 export function LectorCodigo({ alLeer }) {
   /* identificador: valor de trabajo utilizado en esta operación. */
   const identificador = useIdentificador().replaceAll(':', '');
@@ -60,8 +65,8 @@ export function LectorCodigo({ alLeer }) {
         verbose: false,
       });
       referenciaLector.current = lector;
-      /* procesado: valor de trabajo utilizado en esta operación. */
-      let procesado = false;
+      /* ultimo: código y hora de la última lectura aceptada o rechazada. */
+      const ultimo = { texto: '', hora: 0 };
       await lector.start(
         {
           facingMode: 'environment',
@@ -74,14 +79,20 @@ export function LectorCodigo({ alLeer }) {
           },
         },
         (texto) => {
-          if (procesado) return;
+          const ahora = Date.now();
+          if (
+            ahora - ultimo.hora < PAUSA_MS ||
+            (texto === ultimo.texto && ahora - ultimo.hora < REPETIDO_MS)
+          )
+            return;
+          ultimo.texto = texto;
+          ultimo.hora = ahora;
           try {
-            /* usuario: valor de trabajo utilizado en esta operación. */
             const codigo = leerCodigoAcceso(texto);
-            procesado = true;
-            detener();
+            cambiarError('');
             alLeer(codigo);
           } catch (motivo) {
+            tocarTono('error');
             cambiarError(motivo.message);
           }
         },
@@ -106,11 +117,11 @@ export function LectorCodigo({ alLeer }) {
     <section className="xn-lector-qr">
       <div>
         <Escaneo size={22} />
-        <h2>Leer identificación QR</h2>
+        <h2>Escanear carnet QR</h2>
       </div>
       <p>
-        Activa la cámara para obtener el ID. Después verifica la identidad antes
-        de registrar el movimiento.
+        Activa la cámara y apunta al carnet QR de la app o de la web. El
+        movimiento elegido arriba se registra al leerlo.
       </p>
       <div
         id={identificador}
