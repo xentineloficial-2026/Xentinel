@@ -1,12 +1,22 @@
-/** Registro de entradas/salidas por QR o por documento digitado; idempotencia y autorización del servidor. */
+/** Registro de entradas y salidas por QR o por documento. El carnet firmado se registra al
+ * leerlo; el servidor verifica firma, vigencia, estado de la cuenta y secuencia. */
 import { LectorCodigo } from './LectorCodigo.jsx';
-import { ExportarAccesos } from '../admin/ExportarAccesos.jsx';
+import { ExportarReportes } from '../admin/ExportarReportes.jsx';
+import '../../compartido/estilos/acceso.css';
+import { resultadoError, resultadoRegistro } from './resultadoAcceso.js';
 import { useRef as useReferencia, useState as useEstado } from 'react';
+import {
+  LogIn as Entrada,
+  LogOut as Salida,
+  UserX as Rechazo,
+  TriangleAlert as Aviso,
+} from 'lucide-react';
 import { useAutenticacion } from '../../compartido/contextos/autenticacion.js';
 import { rolParaUsuario } from '../../configuracion/navegacion.js';
 import { solicitar } from '../../compartido/servicios/cliente.js';
 import { useRecurso } from '../../compartido/ganchos/useRecurso.js';
 import { useEventos } from '../../compartido/ganchos/useEventos.js';
+import { tocarTono } from '../../compartido/utilidades/tonos.js';
 import {
   MensajeEstado,
   EstadoConsulta,
@@ -19,37 +29,102 @@ import {
   formatearFecha,
   usePaginacion,
 } from '../../compartido/utilidades/tablas.js';
+
+const ICONOS = {
+  entrada: Entrada,
+  salida: Salida,
+  rechazo: Rechazo,
+  aviso: Aviso,
+};
+
+/** Resultado del último registro: color, título y datos de la persona, a la vista del celador. */
+function ResultadoEscaneo({ resultado, alCerrar }) {
+  const Icono = ICONOS[resultado.variante];
+  const persona = resultado.persona;
+  return (
+    <section
+      className={`xn-resultado-acceso xn-resultado-acceso--${resultado.variante}`}
+      role={resultado.variante === 'rechazo' ? 'alert' : 'status'}
+      aria-live="assertive"
+    >
+      <Icono size={44} strokeWidth={2.2} aria-hidden="true" />
+      <div className="xn-resultado-acceso-texto">
+        <h2>{resultado.titulo}</h2>
+        <p>{resultado.detalle}</p>
+        {persona?.nombres_completos && (
+          <dl>
+            <dt>Persona</dt>
+            <dd>
+              <strong>{persona.nombres_completos}</strong>
+            </dd>
+            <dt>Documento</dt>
+            <dd>
+              {persona.tipo_documento} {persona.numero_documento}
+            </dd>
+            <dt>Rol</dt>
+            <dd>{persona.nombre_rol}</dd>
+            {persona.numero_ficha && (
+              <>
+                <dt>Ficha</dt>
+                <dd>
+                  {persona.numero_ficha}
+                  {persona.nombre_programa && ` · ${persona.nombre_programa}`}
+                </dd>
+              </>
+            )}
+            {persona.ambiente && (
+              <>
+                <dt>Ambiente</dt>
+                <dd>{persona.ambiente}</dd>
+              </>
+            )}
+          </dl>
+        )}
+      </div>
+      <button
+        type="button"
+        className="xn-enlace-boton xn-resultado-acceso-cerrar"
+        onClick={alCerrar}
+      >
+        Listo
+      </button>
+    </section>
+  );
+}
+
 function ControlAccesos() {
-  /* usuario: valor de trabajo utilizado en esta operación. */
   const { usuario } = useAutenticacion();
-  /* puedeRegistrar: valor de trabajo utilizado en esta operación. */
   const rol = rolParaUsuario(usuario);
   const puedeRegistrar = ['admin', 'celador'].includes(rol);
-  /* paginacion: valor de trabajo utilizado en esta operación. */
   const paginacion = usePaginacion();
-  /* recurso: consulta cancelable al servidor, con datos, estado y reintento. */
   const esAdmin = rol === 'admin';
   const recurso = useRecurso(
     esAdmin ? `/ingresos?${paginacion.consulta}` : null
   );
-  /* canal: estado de la conexión en vivo; cada escaneo refresca el historial sin recargar. */
+  /* canal: conexión en vivo; cada escaneo refresca el historial sin recargar. */
   const canal = useEventos(esAdmin ? 'acceso' : null, recurso.refrescar);
-  /* formulario, cambiarFormulario: estado de la vista y función para actualizarlo. */
   const [formulario, cambiarFormulario] = useEstado({
     id_usuarios: '',
     tipo: 'ENTRADA',
   });
-  /* retroalimentacion, cambiarRetroalimentacion: estado de la vista y función para actualizarlo. */
   const [retroalimentacion, cambiarRetroalimentacion] = useEstado({});
-  /* guardando, cambiarGuardando: estado de la vista y función para actualizarlo. */
+  const [resultado, cambiarResultado] = useEstado(null);
   const [guardando, cambiarGuardando] = useEstado(false);
-  /* metodoRegistro, cambiarMetodoRegistro: estado de la vista y función para actualizarlo. */
   const [metodoRegistro, cambiarMetodoRegistro] = useEstado('Manual');
-  /* identidadConfirmada, cambiarIdentidadConfirmada: estado de la vista y función para actualizarlo. */
   const [identidadConfirmada, cambiarIdentidadConfirmada] = useEstado(false);
   /* persona: quién corresponde al documento digitado, para confirmarlo antes de registrar. */
   const [persona, cambiarPersona] = useEstado(null);
-  /* buscarDocumento: sin QR, el documento se traduce al usuario en el servidor. */
+  /* operacion: clave de idempotencia; se conserva ante errores de red al reintentar. */
+  const operacion = useReferencia(null);
+  /* codigoLeido: carnet firmado leído con la cámara, enviado tal cual al servidor. */
+  const codigoLeido = useReferencia(null);
+  const ocupado = useReferencia(false);
+
+  const mostrar = (nuevo) => {
+    cambiarResultado(nuevo);
+    tocarTono(nuevo.tono);
+  };
+
   const buscarDocumento = async (documento) => {
     if (!/^[A-Za-z0-9-]{3,20}$/.test(documento)) {
       cambiarRetroalimentacion({
@@ -65,41 +140,72 @@ function ControlAccesos() {
       return data;
     } catch (error) {
       cambiarPersona(null);
-      cambiarRetroalimentacion({ error });
+      mostrar(resultadoError(error, formulario.tipo));
       return null;
     }
   };
-  /* leerCodigo: operación local que atiende el evento o transforma la información. */
+
+  /** Envía el movimiento. Devuelve true si el servidor respondió (permitido o no). */
+  const registrar = async (cuerpo) => {
+    if (ocupado.current) return;
+    ocupado.current = true;
+    cambiarGuardando(true);
+    cambiarRetroalimentacion({});
+    operacion.current ||= crypto.randomUUID();
+    try {
+      const { data } = await solicitar('/ingresos', {
+        method: 'POST',
+        body: { ...cuerpo, request_id: operacion.current },
+      });
+      mostrar(resultadoRegistro(data));
+      operacion.current = null;
+      cambiarFormulario((actual) => ({ ...actual, id_usuarios: '' }));
+      cambiarPersona(null);
+      cambiarIdentidadConfirmada(false);
+      codigoLeido.current = null;
+      cambiarMetodoRegistro('Manual');
+      recurso.actualizar();
+    } catch (error) {
+      mostrar(resultadoError(error, cuerpo.tipo));
+      // Un rechazo definitivo libera la clave; un fallo de red la conserva para no duplicar.
+      if (error.status >= 400 && error.status < 500) operacion.current = null;
+    } finally {
+      ocupado.current = false;
+      cambiarGuardando(false);
+    }
+  };
+
   const leerCodigo = ({ id_usuarios: identificador, codigo_qr }) => {
+    operacion.current = null;
+    cambiarPersona(null);
+    if (codigo_qr) {
+      // Carnet firmado de la app o de la web: el servidor verifica la firma y la vigencia.
+      registrar({
+        codigo_qr,
+        escaneado_en: new Date().toISOString(),
+        tipo: formulario.tipo,
+        metodo: 'QR',
+      });
+      return;
+    }
+    // Código antiguo sin firma: identifica, pero el celador confirma la identidad.
     cambiarFormulario((actual) => ({
       ...actual,
       id_usuarios: String(identificador),
     }));
-    // Carnet firmado de la app: el servidor verifica firma y vigencia con la hora de lectura.
-    codigoLeido.current = codigo_qr
-      ? { codigo_qr, escaneado_en: new Date().toISOString() }
-      : null;
+    codigoLeido.current = null;
     cambiarMetodoRegistro('QR');
-    cambiarPersona(null);
     cambiarIdentidadConfirmada(false);
-    operacion.current = null;
+    cambiarResultado(null);
     cambiarRetroalimentacion({
-      mensaje: 'Código leído. Verifica la identidad y confirma el movimiento.',
+      mensaje:
+        'Código sin firma leído. Verifica la identidad y confirma el movimiento.',
     });
     document.getElementById('access-user')?.focus();
   };
-  /* operacion: referencia estable entre renderizados, sin disparar una actualización visual. */
-  const operacion = useReferencia(null);
-  /* codigoLeido: carnet firmado leído con la cámara, enviado tal cual al servidor. */
-  const codigoLeido = useReferencia(null);
-  /* ocupado: referencia estable entre renderizados, sin disparar una actualización visual. */
-  const ocupado = useReferencia(false);
-  /* cambiar: operación local que atiende el evento o transforma la información. */
+
   const cambiar = (campo, valor) => {
-    cambiarFormulario((actual) => ({
-      ...actual,
-      [campo]: valor,
-    }));
+    cambiarFormulario((actual) => ({ ...actual, [campo]: valor }));
     operacion.current = null;
     if (campo === 'id_usuarios') {
       cambiarMetodoRegistro('Manual');
@@ -109,11 +215,10 @@ function ControlAccesos() {
     cambiarIdentidadConfirmada(false);
     cambiarRetroalimentacion({});
   };
-  /* enviar: operación local que atiende el evento o transforma la información. */
+
   const enviar = async (evento) => {
     evento.preventDefault();
     if (ocupado.current) return;
-    // Con QR llega el ID; a mano se digita el documento y el servidor indica a quién pertenece.
     let identificador = Number(formulario.id_usuarios);
     if (metodoRegistro === 'Manual') {
       const encontrada =
@@ -141,63 +246,62 @@ function ControlAccesos() {
       });
       return;
     }
-    ocupado.current = true;
-    cambiarGuardando(true);
-    cambiarRetroalimentacion({});
-    // Conserva la operación ante errores de red para evitar registros duplicados al reintentar.
-    operacion.current ||= crypto.randomUUID();
-    try {
-      /* data, datos: valor de trabajo utilizado en esta operación. */
-      const { data: datos } = await solicitar('/ingresos', {
-        method: 'POST',
-        body: {
-          id_usuarios: identificador,
-          tipo: formulario.tipo,
-          metodo: metodoRegistro,
-          request_id: operacion.current,
-          ...(metodoRegistro === 'QR' && codigoLeido.current),
-        },
-      });
-      cambiarRetroalimentacion(
-        datos.estado === 'Permitido'
-          ? {
-              mensaje: `${formulario.tipo === 'ENTRADA' ? 'Entrada' : 'Salida'} registrada. Acceso permitido.`,
-            }
-          : {
-              error:
-                'Registro guardado: acceso denegado por el estado de la cuenta.',
-            }
-      );
-      operacion.current = null;
-      recurso.actualizar();
-    } catch (error) {
-      cambiarRetroalimentacion({
-        error,
-      });
-      if (error.status >= 400 && error.status < 500) operacion.current = null;
-    } finally {
-      ocupado.current = false;
-      cambiarGuardando(false);
-    }
+    await registrar({
+      id_usuarios: identificador,
+      tipo: formulario.tipo,
+      metodo: metodoRegistro,
+    });
   };
+
   return (
     <>
       <div className="xn-panel-titulo">
         <div>
           <h1>{puedeRegistrar ? 'Ingresos y salidas' : 'Mis accesos'}</h1>
           <p>
-            Movimientos registrados por el personal autorizado de la
-            institución.
+            Escanea el carnet QR o digita el documento. Cada entrada registra la
+            asistencia del día.
           </p>
         </div>
       </div>
-      {rol === 'celador' && <LectorCodigo alLeer={leerCodigo} />}
+      {puedeRegistrar && (
+        <div
+          className="xn-movimiento-selector"
+          role="radiogroup"
+          aria-label="Movimiento que se registra"
+        >
+          {[
+            ['ENTRADA', 'Entrada', Entrada],
+            ['SALIDA', 'Salida', Salida],
+          ].map(([valor, etiqueta, Icono]) => (
+            <button
+              key={valor}
+              type="button"
+              role="radio"
+              aria-checked={formulario.tipo === valor}
+              className={`xn-movimiento-opcion xn-movimiento-opcion--${valor.toLowerCase()}`}
+              disabled={guardando}
+              onClick={() => cambiar('tipo', valor)}
+            >
+              <Icono size={20} aria-hidden="true" />
+              {etiqueta}
+            </button>
+          ))}
+        </div>
+      )}
+      {resultado && (
+        <ResultadoEscaneo
+          resultado={resultado}
+          alCerrar={() => cambiarResultado(null)}
+        />
+      )}
+      {puedeRegistrar && <LectorCodigo alLeer={leerCodigo} />}
       {puedeRegistrar && (
         <section className="xn-trabajo-tarjeta">
-          <h2>Registrar un movimiento</h2>
+          <h2>Registrar con el documento</h2>
           <p>
-            Verifica la identidad antes de registrar el acceso. La validación
-            del estado y la secuencia de entrada/salida la realiza el servidor.
+            Si la persona no tiene su código QR, digita su documento, verifica
+            su identidad y registra el movimiento.
           </p>
           <form className="xn-access-formulario" noValidate onSubmit={enviar}>
             <div className="xn-campo">
@@ -221,7 +325,7 @@ function ControlAccesos() {
                   buscarDocumento(formulario.id_usuarios.trim())
                 }
                 disabled={guardando}
-                placeholder="Documento, si no hay código QR"
+                placeholder="Ej. 1023456789"
               />
               {persona && metodoRegistro === 'Manual' && (
                 <p className="xn-persona-encontrada" role="status">
@@ -230,18 +334,6 @@ function ControlAccesos() {
                   {persona.numero_documento} · {persona.estado}
                 </p>
               )}
-            </div>
-            <div className="xn-campo">
-              <label htmlFor="access-type">Movimiento</label>
-              <select
-                id="access-type"
-                value={formulario.tipo}
-                onChange={(evento) => cambiar('tipo', evento.target.value)}
-                disabled={guardando}
-              >
-                <option value="ENTRADA">Entrada</option>
-                <option value="SALIDA">Salida</option>
-              </select>
             </div>
             <label className="xn-confirmacion xn-confirmacion-identidad">
               <input
@@ -252,19 +344,17 @@ function ControlAccesos() {
                   cambiarIdentidadConfirmada(evento.target.checked)
                 }
               />
-              Verifiqué la identidad de la persona ({metodoRegistro}).
+              Verifiqué la identidad de la persona.
             </label>
             <button className="xn-boton" disabled={guardando}>
-              {guardando ? 'Registrando…' : 'Registrar acceso'}
+              {guardando
+                ? 'Registrando…'
+                : formulario.tipo === 'ENTRADA'
+                  ? 'Registrar entrada'
+                  : 'Registrar salida'}
             </button>
           </form>
           <MensajeEstado {...retroalimentacion} />
-          <p className="xn-ayuda">
-            {rol === 'celador' &&
-              'El código identifica al usuario; sin código, digita su documento. '}
-            La autorización de acceso depende del estado de su cuenta y del
-            registro del movimiento.
-          </p>
         </section>
       )}
       {esAdmin && (
@@ -284,7 +374,7 @@ function ControlAccesos() {
               >
                 Actualizar
               </button>
-              <ExportarAccesos />
+              <ExportarReportes />
             </div>
           </div>
           <EstadoConsulta recurso={recurso}>
@@ -299,13 +389,15 @@ function ControlAccesos() {
                 },
                 {
                   clave: 'id_usuarios',
-                  etiqueta: 'Usuario',
+                  etiqueta: 'Persona',
                   representar: (fila) =>
                     fila.nombres_completos || fila.id_usuarios,
                 },
                 {
                   clave: 'tipo',
                   etiqueta: 'Movimiento',
+                  representar: (fila) =>
+                    fila.tipo === 'ENTRADA' ? 'Entrada' : 'Salida',
                 },
                 {
                   clave: 'metodo',

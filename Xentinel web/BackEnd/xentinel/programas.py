@@ -3,7 +3,7 @@
 from datetime import time
 from typing import Annotated, Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 from pydantic import Field, StrictBool, StringConstraints, model_validator
 
 from .http import Base, Entrada, ErrorAPI, Id, IdRuta, Paginacion, responder, texto
@@ -40,14 +40,15 @@ class Ficha(Entrada):
 
 class Programa(Entrada):
     nombre_programa: texto(1, 150)
-    nivel_programa: texto(1, 50) | None
-    fichas: Annotated[list[Ficha], Field(max_length=100)]
+    nivel_programa: texto(1, 50) | None = None
+    # Las fichas también se gestionan por separado (/fichas): un programa puede crearse vacío.
+    fichas: Annotated[list[Ficha], Field(default_factory=list, max_length=100)]
 
 
 class NuevoPrograma(Programa):
     @model_validator(mode="after")
     def validar_fichas_nuevas(self):
-        if not self.fichas or any(
+        if any(
             ficha.id_ficha
             or not ficha.horarios
             or any(
@@ -55,7 +56,7 @@ class NuevoPrograma(Programa):
             )
             for ficha in self.fichas
         ):
-            raise ValueError("Agregue al menos una ficha nueva con horario y entorno")
+            raise ValueError("Cada ficha nueva requiere un horario con entorno")
         return self
 
 
@@ -76,7 +77,14 @@ def relacion_invalida():
 def detalle_programa(db, identificador):
     programa = db.fila(
         """SELECT p.*, COALESCE((
-        SELECT jsonb_agg(to_jsonb(f) || jsonb_build_object('horarios', COALESCE((
+        SELECT jsonb_agg(to_jsonb(f) || jsonb_build_object(
+        'total_aprendices', (SELECT count(*) FROM aprendiz_ficha af
+            WHERE af.id_ficha=f.id_ficha AND af.fechasalida IS NULL),
+        'hora_inicio', (SELECT j.hora_inicio FROM jornada j WHERE j.id_ficha=f.id_ficha
+            ORDER BY j.id_jornada DESC LIMIT 1),
+        'hora_fin', (SELECT j.hora_fin FROM jornada j WHERE j.id_ficha=f.id_ficha
+            ORDER BY j.id_jornada DESC LIMIT 1),
+        'horarios', COALESCE((
             SELECT jsonb_agg(to_jsonb(h) || jsonb_build_object('instructor', u.nombres_completos)
                 ORDER BY h.id_horario) FROM horarios h JOIN usuarios u ON u.id_usuarios=h.id_instructor
             WHERE h.id_ficha=f.id_ficha
@@ -180,8 +188,12 @@ def listar(
     visible = filtro if es_admin(sesion.usuario) else True
     return responder(
         db.filas(
-            """SELECT * FROM programa WHERE (%s::boolean IS NULL OR activo=%s)
-        ORDER BY id_programa LIMIT %s OFFSET %s""",
+            """SELECT p.*,
+        (SELECT count(*) FROM ficha f WHERE f.id_programa=p.id_programa)::int AS total_fichas,
+        (SELECT count(*) FROM aprendiz_ficha af JOIN ficha f USING(id_ficha)
+            WHERE f.id_programa=p.id_programa AND af.fechasalida IS NULL)::int AS total_aprendices
+        FROM programa p WHERE (%s::boolean IS NULL OR p.activo=%s)
+        ORDER BY p.id_programa DESC LIMIT %s OFFSET %s""",
             visible,
             visible,
             pagina["limit"],
@@ -244,3 +256,21 @@ def actualizar(
         guardar_fichas(conexion, id, datos.fichas)
         resultado = detalle_programa(conexion, id)
     return responder(resultado)
+
+
+@rutas.delete("/{id}", status_code=204)
+def eliminar(id: IdRuta, db: Base, sesion: Administrador):
+    """Solo se elimina un programa sin fichas; con fichas se desactiva."""
+    with db.transaccion() as conexion:
+        if not conexion.fila(
+            "SELECT 1 FROM programa WHERE id_programa=%s FOR UPDATE", id
+        ):
+            raise ausente()
+        if conexion.fila("SELECT 1 FROM ficha WHERE id_programa=%s LIMIT 1", id):
+            raise ErrorAPI(
+                409,
+                "PROGRAM_WITH_FICHAS",
+                "El programa tiene fichas. Elimínalas o desactiva el programa.",
+            )
+        conexion.ejecutar("DELETE FROM programa WHERE id_programa=%s", id)
+    return Response(status_code=204)

@@ -35,6 +35,7 @@ import { Resumen } from '../compartido/componentes/Resumen.jsx';
 import { ControlAccesos } from '../modulos/celador/ControlAccesos.jsx';
 import { GestionPersonas } from '../modulos/admin/GestionPersonas.jsx';
 import { GestionProgramas } from '../modulos/admin/GestionProgramas.jsx';
+import { GestionFichas } from '../modulos/admin/GestionFichas.jsx';
 import { ExportarHorarios } from '../modulos/admin/ExportarHorarios.jsx';
 import { InformacionAcademica } from '../modulos/instructor/InformacionAcademica.jsx';
 import { ListaAsistencia } from '../modulos/instructor/ListaAsistencia.jsx';
@@ -278,6 +279,8 @@ export function PanelTrabajo({ rolEsperado: rol }) {
   else if (modulo === 'usuarios') contenido = <GestionPersonas />;
   else if (modulo === 'programas' && rol === 'admin')
     contenido = <GestionProgramas />;
+  else if (modulo === 'fichas' && rol === 'admin')
+    contenido = <GestionFichas />;
   else if (modulo === 'perfil') contenido = <MiPerfil />;
   else if (modulo === 'alertas') contenido = <PanelAlertas />;
   else if (modulo === 'qr') contenido = <MiCredencial />;

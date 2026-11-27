@@ -67,6 +67,14 @@ export function ExportarHorarios({ programa }) {
         >
           {formato === 'csv' ? 'Preparando CSV…' : 'Exportar horarios CSV'}
         </button>
+        <button
+          type="button"
+          className="xn-boton xn-boton--secundario"
+          disabled={!!formato}
+          onClick={() => exportar('pdf')}
+        >
+          {formato === 'pdf' ? 'Preparando PDF…' : 'Exportar horarios PDF'}
+        </button>
       </div>
       <MensajeEstado {...estado} />
     </div>

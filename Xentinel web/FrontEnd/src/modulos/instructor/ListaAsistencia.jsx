@@ -193,11 +193,17 @@ export function ListaAsistencia() {
     try {
       await descargarReporte(
         porDia
-          ? reporteAsistencia(fecha, filasDia, fichaElegida?.numero_ficha)
+          ? reporteAsistencia(
+              fecha,
+              filasDia,
+              fichaElegida?.numero_ficha,
+              fichaElegida?.nombre_programa
+            )
           : reporteAsistenciaPeriodo({
               rango,
               nombre: nombreRango(periodo, rango),
               numeroFicha: fichaElegida?.numero_ficha,
+              programa: fichaElegida?.nombre_programa,
               resumen: filasResumen,
               detalle: aprendiz ? detalle : [],
               persona: personaElegida,
@@ -340,6 +346,13 @@ export function ListaAsistencia() {
             onClick={() => descargar('xlsx')}
           >
             Descargar Excel
+          </button>
+          <button
+            className="xn-boton xn-boton--secundario"
+            disabled={!hayFilas}
+            onClick={() => descargar('pdf')}
+          >
+            Descargar PDF
           </button>
         </div>
       </div>

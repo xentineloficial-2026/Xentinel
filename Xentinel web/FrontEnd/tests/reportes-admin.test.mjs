@@ -10,7 +10,9 @@ import {
   consultarReporte,
   fechaBogota,
   reporteAccesos,
+  reporteAsistenciaGeneral,
   reporteAsistenciaPeriodo,
+  reporteIngresos,
   reporteHorarios,
 } from '../src/modulos/admin/reportes.js';
 
@@ -67,6 +69,7 @@ test('el CSV conserva todos los movimientos, incluido el último', async () => {
     id_acceso: indice + 1,
     fechahora: '2026-11-04T05:00:00Z',
     id_usuarios: 90100 + indice,
+    nombres_completos: `Persona ${90100 + indice}`,
     tipo: indice % 2 ? 'ENTRADA' : 'SALIDA',
     metodo: 'Manual',
     estado: 'Permitido',
@@ -74,7 +77,121 @@ test('el CSV conserva todos los movimientos, incluido el último', async () => {
   const archivo = generarCsv(reporteAccesos('2026-11-04', accesos));
   const contenido = await archivo.text();
   assert.equal(contenido.trim().split('\r\n').length, 102);
-  assert.match(contenido, /90200/);
+  assert.match(contenido, /Persona 90200/);
+});
+
+test('ingresos: fecha aparte, entrada y salida en la misma fila y contexto de la persona', () => {
+  const persona = {
+    id_usuarios: 7,
+    nombres_completos: 'Ana Prueba',
+    tipo_documento: 'TI',
+    numero_documento: '1001',
+    nombre_rol: 'Aprendiz',
+    nombre_programa: 'ADSO',
+    numero_ficha: '2675859',
+    metodo: 'QR',
+  };
+  const reporte = reporteIngresos(
+    { desde: '2026-11-03', hasta: '2026-11-04' },
+    [
+      {
+        ...persona,
+        id_acceso: 1,
+        tipo: 'ENTRADA',
+        estado: 'Permitido',
+        fechahora: '2026-11-03T12:05:00Z',
+      },
+      {
+        ...persona,
+        id_acceso: 2,
+        tipo: 'SALIDA',
+        estado: 'Permitido',
+        fechahora: '2026-11-03T22:10:00Z',
+      },
+      {
+        ...persona,
+        id_acceso: 3,
+        tipo: 'ENTRADA',
+        estado: 'Denegado',
+        fechahora: '2026-11-04T12:00:00Z',
+      },
+    ]
+  );
+  assert.deepEqual(reporte.columnas, [
+    'Fecha',
+    'Nombre completo',
+    'Tipo de documento',
+    'Documento',
+    'Rol',
+    'Programa de formación',
+    'Ficha',
+    'Hora de entrada',
+    'Hora de salida',
+    'Método',
+    'Resultado',
+  ]);
+  assert.deepEqual(reporte.filas, [
+    [
+      '03/11/2026',
+      'Ana Prueba',
+      'TI',
+      '1001',
+      'Aprendiz',
+      'ADSO',
+      '2675859',
+      '07:05:00',
+      '17:10:00',
+      'QR',
+      'Permitido',
+    ],
+    [
+      '04/11/2026',
+      'Ana Prueba',
+      'TI',
+      '1001',
+      'Aprendiz',
+      'ADSO',
+      '2675859',
+      '07:00:00',
+      '',
+      'QR',
+      'Denegado',
+    ],
+  ]);
+  assert.match(reporte.subtitulo, /03\/11\/2026 a 04\/11\/2026/);
+});
+
+test('asistencia general: una fila por persona y día con fecha legible', () => {
+  const reporte = reporteAsistenciaGeneral(
+    { desde: '2026-11-04', hasta: '2026-11-04' },
+    [
+      {
+        id_asistencia: 1,
+        fecha: '2026-11-04',
+        hora_entrada: '07:20:00',
+        hora_salida: null,
+        estado: 'Retardo',
+        nombres_completos: 'Beto',
+        tipo_documento: 'CC',
+        numero_documento: '9',
+        nombre_rol: 'Instructor',
+        nombre_programa: null,
+        numero_ficha: null,
+      },
+    ]
+  );
+  assert.deepEqual(reporte.filas[0], [
+    '04/11/2026',
+    'Beto',
+    'CC',
+    '9',
+    'Instructor',
+    '',
+    '',
+    '07:20',
+    '',
+    'Retardo',
+  ]);
 });
 
 test('la frecuencia por periodo exporta el resumen y el historial del aprendiz', () => {
@@ -98,19 +215,32 @@ test('la frecuencia por periodo exporta el resumen y el historial del aprendiz',
     resumen: [persona],
   };
   const resumen = reporteAsistenciaPeriodo({ ...base, detalle: [] });
-  assert.deepEqual(resumen.columnas.slice(4, 8), [
+  assert.deepEqual(resumen.columnas.slice(0, 2), ['Desde', 'Hasta']);
+  assert.deepEqual(resumen.columnas.slice(9, 13), [
     'Presente',
     'Retardo',
     'Ausente',
     'Sin registro',
   ]);
-  assert.deepEqual(resumen.filas[0].slice(4, 10), [2, 1, 0, 1, 75, 67]);
+  assert.deepEqual(resumen.filas[0].slice(0, 2), ['02/11/2026', '08/11/2026']);
+  assert.deepEqual(resumen.filas[0].slice(8, 15), [4, 2, 1, 0, 1, 75, 67]);
   const historial = reporteAsistenciaPeriodo({
     ...base,
     persona,
     detalle: [{ fecha: '2026-11-02', estado_asistencia: 'Retardo' }],
   });
-  assert.deepEqual(historial.filas[0], ['2026-11-02', '', '', 'Retardo']);
+  assert.deepEqual(historial.filas[0], [
+    '02/11/2026',
+    'Ana Prueba',
+    'TI',
+    '1001',
+    'Aprendiz',
+    '',
+    '3',
+    '',
+    '',
+    'Retardo',
+  ]);
 });
 
 test('Excel abre como .xlsx y conserva valores con formato de texto', async () => {

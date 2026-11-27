@@ -47,8 +47,21 @@ class Movimiento(Entrada):
         return self
 
 
+# Ficha activa del aprendiz (misma regla que la lista de asistencia).
+FICHA_ACTIVA = """af.fechasalida IS NULL
+    AND lower(af.estado) NOT IN ('inactivo','retirado','finalizado','cancelado','desertado')"""
+# Una entrada sin salida de hace más de 16 horas es una salida olvidada: la siguiente
+# lectura vuelve a ser una entrada. Cubre también las jornadas que cruzan la medianoche.
+SALIDA_OLVIDADA = timedelta(hours=16)
+COLUMNAS_ASISTENCIA = "id_asistencia,id_jornada,fecha,hora_entrada,hora_salida,estado"
+
+
 def registrar_asistencia(conexion, movimiento, zona):
-    """Refleja un acceso permitido en la asistencia del aprendiz, dentro de la misma transacción."""
+    """Refleja un acceso permitido en la asistencia del día, dentro de la misma transacción.
+
+    Vale para cualquier persona. El aprendiz con ficha activa y jornada queda «Presente» si
+    llega hasta la hora de inicio y «Retardo» después. Quien no tiene jornada (otros roles,
+    aprendices recién creados o sin ficha) queda «Presente» en una fila sin jornada."""
     local = conexion.fila(
         """SELECT (%s::timestamptz AT TIME ZONE %s)::date AS fecha,
         (%s::timestamptz AT TIME ZONE %s)::time(0) AS hora""",
@@ -57,48 +70,91 @@ def registrar_asistencia(conexion, movimiento, zona):
         movimiento["fechahora"],
         zona,
     )
-    if movimiento["tipo"] == "ENTRADA":
-        # Sólo los aprendices con ficha y jornada generan asistencia. Vale la jornada vigente de
-        # la ficha (la más reciente que definió el administrador). A tiempo hasta la hora de inicio.
-        # Volver a entrar reabre el día y conserva la puntualidad de la primera llegada.
-        with conexion.conexion.cursor() as cursor:
-            cursor.execute(
-                """INSERT INTO asistencia(id_usuarios,id_jornada,fecha,hora_entrada,estado)
-                SELECT af.id_usuarios,j.id_jornada,%(fecha)s,%(hora)s,
+    valores = {
+        "fecha": local["fecha"],
+        "hora": local["hora"],
+        "usuario": movimiento["id_usuarios"],
+    }
+    if movimiento["tipo"] == "SALIDA":
+        return conexion.fila(
+            f"""UPDATE asistencia SET hora_salida=%s WHERE id_asistencia=(
+            SELECT id_asistencia FROM asistencia WHERE id_usuarios=%s AND fecha=%s
+            ORDER BY hora_entrada DESC NULLS LAST,id_asistencia DESC LIMIT 1)
+            RETURNING {COLUMNAS_ASISTENCIA}""",
+            local["hora"],
+            movimiento["id_usuarios"],
+            local["fecha"],
+        )
+    with conexion.conexion.cursor() as cursor:
+        # Vale la jornada vigente (la más reciente) de la ficha activa. Volver a entrar
+        # reabre el día y conserva la puntualidad de la primera llegada.
+        jornada = cursor.execute(
+            f"""SELECT j.id_jornada FROM aprendiz_ficha af
+            JOIN jornada j ON j.id_ficha=af.id_ficha
+            WHERE af.id_usuarios=%(usuario)s AND {FICHA_ACTIVA}
+            ORDER BY af.id_aprendiz_ficha DESC,j.id_jornada DESC LIMIT 1""",
+            valores,
+        ).fetchone()
+        if jornada:
+            return cursor.execute(
+                f"""INSERT INTO asistencia(id_usuarios,id_jornada,fecha,hora_entrada,estado)
+                SELECT %(usuario)s,j.id_jornada,%(fecha)s,%(hora)s,
                 CASE WHEN %(hora)s::time<=j.hora_inicio THEN 'Presente' ELSE 'Retardo' END
-                FROM aprendiz_ficha af JOIN jornada j ON j.id_ficha=af.id_ficha
-                WHERE af.id_usuarios=%(usuario)s
-                ORDER BY j.id_jornada DESC LIMIT 1
+                FROM jornada j WHERE j.id_jornada=%(jornada)s
                 ON CONFLICT (id_usuarios,id_jornada,fecha) DO UPDATE SET
                 estado=CASE WHEN asistencia.hora_entrada IS NULL THEN EXCLUDED.estado ELSE asistencia.estado END,
-                hora_entrada=coalesce(asistencia.hora_entrada,EXCLUDED.hora_entrada),hora_salida=NULL""",
-                {
-                    "fecha": local["fecha"],
-                    "hora": local["hora"],
-                    "usuario": movimiento["id_usuarios"],
-                },
-            )
-        return
-    conexion.ejecutar(
-        """UPDATE asistencia SET hora_salida=%s WHERE id_asistencia=(
-        SELECT id_asistencia FROM asistencia WHERE id_usuarios=%s AND fecha=%s
-        ORDER BY hora_entrada DESC NULLS LAST,id_asistencia DESC LIMIT 1)""",
-        local["hora"],
-        movimiento["id_usuarios"],
-        local["fecha"],
+                hora_entrada=coalesce(asistencia.hora_entrada,EXCLUDED.hora_entrada),hora_salida=NULL
+                RETURNING {COLUMNAS_ASISTENCIA}""",
+                {**valores, "jornada": jornada["id_jornada"]},
+            ).fetchone()
+        return cursor.execute(
+            f"""INSERT INTO asistencia(id_usuarios,fecha,hora_entrada,estado)
+            VALUES(%(usuario)s,%(fecha)s,%(hora)s,'Presente')
+            ON CONFLICT (id_usuarios,fecha) WHERE id_jornada IS NULL DO UPDATE SET
+            estado=CASE WHEN asistencia.hora_entrada IS NULL THEN EXCLUDED.estado ELSE asistencia.estado END,
+            hora_entrada=coalesce(asistencia.hora_entrada,EXCLUDED.hora_entrada),hora_salida=NULL
+            RETURNING {COLUMNAS_ASISTENCIA}""",
+            valores,
+        ).fetchone()
+
+
+def asistencia_del_dia(conexion, identificador, instante, zona):
+    """La asistencia vigente del día del movimiento, para repetir la respuesta original."""
+    return conexion.fila(
+        f"""SELECT {COLUMNAS_ASISTENCIA} FROM asistencia WHERE id_usuarios=%s
+        AND fecha=(%s::timestamptz AT TIME ZONE %s)::date
+        ORDER BY hora_entrada DESC NULLS LAST,id_asistencia DESC LIMIT 1""",
+        identificador,
+        instante,
+        zona,
     )
+
+
+def motivo_denegado(persona):
+    """Por qué se negó el acceso, en palabras para el punto de control."""
+    if not activo(persona):
+        return {
+            "codigo": "USUARIO_INACTIVO",
+            "mensaje": "Usuario inactivo: la cuenta está desactivada",
+        }
+    return {
+        "codigo": "APRENDIZ_RETIRADO",
+        "mensaje": "Aprendiz retirado o desertado de la formación",
+    }
 
 
 def datos_persona(conexion, identificador):
     """Lo que el celador necesita ver al autorizar: nombre, documento, ficha y aula."""
     return conexion.fila(
         f"""SELECT u.nombres_completos,u.tipo_documento,u.numero_documento,r.nombre_rol,
-        f.numero_ficha,coalesce(u.ambiente,{AULA_DE_FICHA}) AS ambiente
+        u.estado,f.numero_ficha,p.nombre_programa,
+        coalesce(u.ambiente,{AULA_DE_FICHA}) AS ambiente
         FROM usuarios u JOIN rol r USING(id_rol)
         LEFT JOIN LATERAL (SELECT af.id_ficha FROM aprendiz_ficha af
             WHERE af.id_usuarios=u.id_usuarios
             ORDER BY af.fechasalida IS NULL DESC,af.id_aprendiz_ficha DESC LIMIT 1) a ON true
         LEFT JOIN ficha f ON f.id_ficha=a.id_ficha
+        LEFT JOIN programa p ON p.id_programa=f.id_programa
         WHERE u.id_usuarios=%s""",
         identificador,
     )
@@ -213,8 +269,23 @@ def registrar_movimiento(datos, solicitud, db, sesion, alarma):
                     "IDEMPOTENCY_CONFLICT",
                     "request_id ya usado para otra operación",
                 )
+            persona = datos_persona(conexion, identificador)
             return responder(
-                {**previo, "persona": datos_persona(conexion, identificador)}
+                {
+                    **previo,
+                    "persona": persona,
+                    "asistencia": asistencia_del_dia(
+                        conexion,
+                        identificador,
+                        previo["fechahora"],
+                        config.ZONA_HORARIA,
+                    )
+                    if previo["estado"] == "Permitido"
+                    else None,
+                    "motivo": None
+                    if previo["estado"] == "Permitido"
+                    else motivo_denegado(persona),
+                }
             )
         if paso_qr is not None:
             # La vigencia se mide en el instante del escaneo, no en el de la sincronización.
@@ -226,14 +297,18 @@ def registrar_movimiento(datos, solicitud, db, sesion, alarma):
         estado = "Permitido" if activo(persona) and not retirado else "Denegado"
         if estado == "Permitido":
             anterior = conexion.fila(
-                """SELECT tipo FROM acceso WHERE id_usuarios=%s AND estado='Permitido'
+                """SELECT tipo,fechahora FROM acceso WHERE id_usuarios=%s AND estado='Permitido'
                 AND fechahora<=coalesce(%s::timestamptz,now())
                 ORDER BY fechahora DESC,id_acceso DESC LIMIT 1""",
                 identificador,
                 escaneado,
             )
             esperado = (
-                "SALIDA" if anterior and anterior["tipo"] == "ENTRADA" else "ENTRADA"
+                "SALIDA"
+                if anterior
+                and anterior["tipo"] == "ENTRADA"
+                and (escaneado or ahora) - anterior["fechahora"] < SALIDA_OLVIDADA
+                else "ENTRADA"
             )
             if datos.tipo != esperado:
                 raise ErrorAPI(
@@ -252,7 +327,18 @@ def registrar_movimiento(datos, solicitud, db, sesion, alarma):
             datos.request_id,
             escaneado,
         )
-        if estado == "Permitido":
+        asistencia = (
             registrar_asistencia(conexion, registro, config.ZONA_HORARIA)
+            if estado == "Permitido"
+            else None
+        )
         persona = datos_persona(conexion, identificador)
-    return responder({**registro, "persona": persona}, 201)
+    return responder(
+        {
+            **registro,
+            "persona": persona,
+            "asistencia": asistencia,
+            "motivo": None if estado == "Permitido" else motivo_denegado(persona),
+        },
+        201,
+    )
