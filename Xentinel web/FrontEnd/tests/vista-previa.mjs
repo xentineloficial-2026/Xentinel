@@ -1,5 +1,6 @@
 /** Servidor QA en memoria: no reenvía peticiones a la base de datos ni envía correos. */
 import { createServer as crearServidor } from 'vite';
+import { atenderAcademico, crearDatosAcademicos } from './qa-academico.mjs';
 const personas = [
   {
     id_usuarios: 1,
@@ -126,6 +127,7 @@ const horarios = [
   numero_ficha: fichas.find((ficha) => ficha.id_ficha === horario.id_ficha)
     .numero_ficha,
 }));
+const academico = crearDatosAcademicos(personas, horarios);
 const alertas = [];
 /* Semáforo igual al de la API: el verde (informativa) nunca es alarma. */
 const semaforoDe = (severidad) =>
@@ -243,6 +245,20 @@ const complemento = {
           409
         );
       if (!usuario) return fallar('Inicia sesión', 401);
+      const atendida = atenderAcademico(academico, {
+        ruta,
+        metodo: peticion.method,
+        cuerpo,
+        url: peticion.url,
+        usuario,
+        enviar,
+        fallar,
+        sinContenido: () => {
+          respuesta.statusCode = 204;
+          return respuesta.end();
+        },
+      });
+      if (atendida !== false) return;
       if (ruta === '/auth/me') return enviar(usuario);
       if (ruta === '/auth/contrasena')
         return cuerpo.actual === 'demo-password-12'
@@ -308,7 +324,11 @@ const complemento = {
         );
       if (ruta === '/roles')
         return enviar(
-          personas.map((persona) => ({
+          [
+            ...new Map(
+              personas.map((persona) => [persona.id_rol, persona])
+            ).values(),
+          ].map((persona) => ({
             id_rol: persona.id_rol,
             nombre_rol: persona.nombre_rol,
           }))
