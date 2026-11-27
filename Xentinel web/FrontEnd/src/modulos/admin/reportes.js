@@ -75,60 +75,163 @@ export async function consultarReporte(ruta, clave, parametros = {}, senal) {
   return filas;
 }
 
-export function reporteAccesos(fecha, accesos) {
+/** Fecha legible para Colombia: 2026-11-04 → 04/11/2026. */
+export function fechaLegible(iso) {
+  if (!iso) return '';
+  const [anio, mes, dia] = String(iso).slice(0, 10).split('-');
+  return `${dia}/${mes}/${anio}`;
+}
+
+function horaCorta(hora) {
+  return hora ? String(hora).slice(0, 5) : '';
+}
+
+function periodoLegible({ desde, hasta }) {
+  return desde === hasta
+    ? fechaLegible(desde)
+    : `${fechaLegible(desde)} a ${fechaLegible(hasta)}`;
+}
+
+/** Columnas de contexto de cada persona, iguales en todos los reportes. */
+const COLUMNAS_PERSONA = [
+  'Nombre completo',
+  'Tipo de documento',
+  'Documento',
+  'Rol',
+  'Programa de formación',
+  'Ficha',
+];
+const datosPersona = (fila, contexto = {}) => [
+  fila.nombres_completos ?? '',
+  fila.tipo_documento ?? '',
+  fila.numero_documento ?? '',
+  fila.nombre_rol ?? contexto.rol ?? '',
+  fila.nombre_programa ?? contexto.programa ?? '',
+  fila.numero_ficha ?? contexto.ficha ?? '',
+];
+
+/**
+ * Ingresos y salidas de uno o varios días. Cada fila es una visita: la entrada y la salida
+ * de la misma persona el mismo día quedan juntas, con la fecha aparte de las horas.
+ * Los intentos denegados se listan solos.
+ */
+export function reporteIngresos(rango, accesos) {
   const ordenados = [...accesos].sort(
     (a, b) =>
       new Date(a.fechahora) - new Date(b.fechahora) || a.id_acceso - b.id_acceso
   );
-  if (
-    ordenados.some(
-      (acceso) => fechaBogota(new Date(acceso.fechahora)) !== fecha
-    )
-  ) {
+  const fuera = ordenados.some((acceso) => {
+    const dia = fechaBogota(new Date(acceso.fechahora));
+    return dia < rango.desde || dia > rango.hasta;
+  });
+  if (fuera)
     throw new Error(
       'El servidor devolvió movimientos de otro día. No se descargó el reporte.'
     );
+  const visitas = [];
+  const abiertas = new Map();
+  for (const acceso of ordenados) {
+    const fecha = fechaBogota(new Date(acceso.fechahora));
+    const hora = formatoHora.format(new Date(acceso.fechahora));
+    const clave = `${acceso.id_usuarios}|${fecha}`;
+    const permitido = acceso.estado === 'Permitido';
+    if (permitido && acceso.tipo === 'SALIDA' && abiertas.has(clave)) {
+      abiertas.get(clave).salida = hora;
+      abiertas.delete(clave);
+      continue;
+    }
+    const visita = {
+      acceso,
+      fecha,
+      entrada: acceso.tipo === 'ENTRADA' ? hora : '',
+      salida: acceso.tipo === 'SALIDA' ? hora : '',
+    };
+    visitas.push(visita);
+    if (permitido && acceso.tipo === 'ENTRADA') abiertas.set(clave, visita);
   }
   return {
-    titulo: 'Historial diario de accesos',
-    hoja: 'Accesos',
-    subtitulo: `${fecha} · Hora de Bogotá · ${ordenados.length} movimientos`,
-    archivo: `xentinel-accesos-${fecha}`,
-    columnas: ['Hora', 'ID de usuario', 'Movimiento', 'Método', 'Resultado'],
-    filas: ordenados.map((acceso) => [
-      formatoHora.format(new Date(acceso.fechahora)),
-      acceso.id_usuarios,
-      acceso.tipo === 'ENTRADA' ? 'Entrada' : 'Salida',
+    titulo: 'Reporte de ingresos y salidas',
+    hoja: 'Ingresos',
+    subtitulo: `${periodoLegible(rango)} · Hora de Bogotá · ${ordenados.length} movimientos`,
+    archivo:
+      rango.desde === rango.hasta
+        ? `xentinel-ingresos-${rango.desde}`
+        : `xentinel-ingresos-${rango.desde}-a-${rango.hasta}`,
+    columnas: [
+      'Fecha',
+      ...COLUMNAS_PERSONA,
+      'Hora de entrada',
+      'Hora de salida',
+      'Método',
+      'Resultado',
+    ],
+    filas: visitas.map(({ acceso, fecha, entrada, salida }) => [
+      fechaLegible(fecha),
+      ...datosPersona(acceso),
+      entrada,
+      salida,
       acceso.metodo,
       acceso.estado,
     ]),
   };
 }
 
-export function reporteAsistencia(fecha, filas, numeroFicha) {
+/** Compatibilidad: historial de un solo día. */
+export function reporteAccesos(fecha, accesos) {
+  return reporteIngresos({ desde: fecha, hasta: fecha }, accesos);
+}
+
+/** Asistencia de toda la sede (o de una ficha) en un periodo, desde /reportes/asistencia. */
+export function reporteAsistenciaGeneral(rango, filas, numeroFicha) {
+  return {
+    titulo: 'Reporte de asistencia',
+    hoja: 'Asistencia',
+    subtitulo: `${periodoLegible(rango)} · ${numeroFicha ? `Ficha ${numeroFicha}` : 'Toda la sede'} · ${filas.length} registros`,
+    archivo: `xentinel-asistencia-${numeroFicha ?? 'sede'}-${rango.desde}${rango.hasta !== rango.desde ? `-a-${rango.hasta}` : ''}`,
+    columnas: [
+      'Fecha',
+      ...COLUMNAS_PERSONA,
+      'Hora de entrada',
+      'Hora de salida',
+      'Estado',
+    ],
+    filas: [...filas]
+      .sort(
+        (a, b) =>
+          a.fecha.localeCompare(b.fecha) ||
+          (a.nombres_completos ?? '').localeCompare(b.nombres_completos ?? '')
+      )
+      .map((fila) => [
+        fechaLegible(fila.fecha),
+        ...datosPersona(fila),
+        horaCorta(fila.hora_entrada),
+        horaCorta(fila.hora_salida),
+        fila.estado,
+      ]),
+  };
+}
+
+/** Lista de asistencia de un día, por ficha (vista del instructor). */
+export function reporteAsistencia(fecha, filas, numeroFicha, programa) {
   return {
     titulo: 'Lista de asistencia',
     hoja: 'Asistencia',
-    subtitulo: `${fecha} · ${numeroFicha ? `Ficha ${numeroFicha}` : 'Todas las fichas'} · ${filas.length} aprendices`,
+    subtitulo: `${fechaLegible(fecha)} · ${numeroFicha ? `Ficha ${numeroFicha}` : 'Todas las fichas'} · ${filas.length} aprendices`,
     archivo: `xentinel-asistencia-${numeroFicha ?? 'fichas'}-${fecha}`,
     columnas: [
-      'Aprendiz',
-      'Tipo',
-      'Documento',
-      'Ficha',
-      'Aula',
-      'Entrada',
-      'Salida',
+      'Fecha',
+      ...COLUMNAS_PERSONA,
+      'Ambiente',
+      'Hora de entrada',
+      'Hora de salida',
       'Estado',
     ],
     filas: filas.map((fila) => [
-      fila.nombres_completos,
-      fila.tipo_documento,
-      fila.numero_documento,
-      fila.numero_ficha,
+      fechaLegible(fila.fecha ?? fecha),
+      ...datosPersona(fila, { rol: 'Aprendiz', programa }),
       fila.ambiente ?? '',
-      fila.hora_entrada?.slice(0, 5) ?? '',
-      fila.hora_salida?.slice(0, 5) ?? '',
+      horaCorta(fila.hora_entrada),
+      horaCorta(fila.hora_salida),
       fila.estado_asistencia,
     ]),
   };
@@ -139,12 +242,14 @@ export function reporteAsistenciaPeriodo({
   rango,
   nombre,
   numeroFicha,
+  programa,
   resumen,
   detalle,
   persona,
 }) {
+  const contexto = { rol: 'Aprendiz', programa, ficha: numeroFicha };
   const base = {
-    subtitulo: `${nombre} · Ficha ${numeroFicha ?? ''}`,
+    subtitulo: `${nombre} · ${periodoLegible(rango)} · Ficha ${numeroFicha ?? ''}`,
     hoja: 'Asistencia',
   };
   if (persona && detalle.length)
@@ -152,11 +257,18 @@ export function reporteAsistenciaPeriodo({
       ...base,
       titulo: `Asistencia de ${persona.nombres_completos}`,
       archivo: `xentinel-asistencia-${persona.numero_documento}-${rango.desde}-${rango.hasta}`,
-      columnas: ['Fecha', 'Entrada', 'Salida', 'Estado'],
+      columnas: [
+        'Fecha',
+        ...COLUMNAS_PERSONA,
+        'Hora de entrada',
+        'Hora de salida',
+        'Estado',
+      ],
       filas: detalle.map((fila) => [
-        fila.fecha,
-        fila.hora_entrada?.slice(0, 5) ?? '',
-        fila.hora_salida?.slice(0, 5) ?? '',
+        fechaLegible(fila.fecha),
+        ...datosPersona({ ...persona, ...fila }, contexto),
+        horaCorta(fila.hora_entrada),
+        horaCorta(fila.hora_salida),
         fila.estado_asistencia,
       ]),
     };
@@ -165,9 +277,9 @@ export function reporteAsistenciaPeriodo({
     titulo: 'Frecuencia de asistencia',
     archivo: `xentinel-frecuencia-${numeroFicha ?? 'ficha'}-${rango.desde}-${rango.hasta}`,
     columnas: [
-      'Aprendiz',
-      'Tipo',
-      'Documento',
+      'Desde',
+      'Hasta',
+      ...COLUMNAS_PERSONA,
       'Días de clase',
       'Presente',
       'Retardo',
@@ -177,9 +289,9 @@ export function reporteAsistenciaPeriodo({
       'Puntualidad %',
     ],
     filas: resumen.map((fila) => [
-      fila.nombres_completos,
-      fila.tipo_documento,
-      fila.numero_documento,
+      fechaLegible(rango.desde),
+      fechaLegible(rango.hasta),
+      ...datosPersona(fila, contexto),
       fila.dias,
       fila.presentes,
       fila.retardos,
